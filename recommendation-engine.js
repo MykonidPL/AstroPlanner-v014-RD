@@ -45,11 +45,19 @@
   }
 
   function windowPhrase(hours){
-    if(hours>=4)return'długie okno';
-    if(hours>=2)return'dobre okno';
-    if(hours>=0.75)return'krótkie okno';
+    if(hours>=6)return'długie okno';
+    if(hours>=3.5)return'średnie okno';
+    if(hours>=1.5)return'krótkie okno';
     if(hours>0)return'bardzo krótkie okno';
     return'brak sensownego okna';
+  }
+
+  function coveragePhrase(coverage){
+    if(coverage>=0.75)return'przez większość nocy';
+    if(coverage>=0.45)return'przez sporą część nocy';
+    if(coverage>=0.20)return'tylko przez część nocy';
+    if(coverage>0)return'tylko krótko w nocy';
+    return'poza użyteczną częścią nocy';
   }
 
   function altitudePhrase(peak){
@@ -75,18 +83,27 @@
     raDeg=Number(raDeg);decDeg=Number(decDeg);
     if(!Number.isFinite(raDeg)||raDeg<0||raDeg>=360||!Number.isFinite(decDeg)||decDeg<-90||decDeg>90)throw new Error('Nieprawidłowe współrzędne celu');
     if(!context?.samples?.length||!validAstro(astro))throw new Error('Brak kontekstu rekomendacji');
+
     const cfg=CLASS_CONFIG[classKey]||CLASS_CONFIG.broadband,stepHours=context.stepMinutes/60;
-    let peakAltitude=-90,effectiveHours=0,darknessQualitySum=0,darknessQualityN=0,moonWeighted=0,moonWeightSum=0;
-    const windowFlags=[];
+    let totalDarkHours=0,effectiveHours=0,bestAltitudeQuality=0,bestImagingAltitude=-90,moonWeighted=0,moonWeightSum=0;
+    const continuityFlags=[];
+
     for(const s of context.samples){
       const objAlt=astro.altitude(raDeg,decDeg,s.t,context.lat,context.lon),dark=s.darkness;
-      if(dark>0.05&&objAlt>peakAltitude)peakAltitude=objAlt;
-      if(objAlt>=30&&dark>0){
-        effectiveHours+=stepHours*dark;
-        darknessQualitySum+=dark;
-        darknessQualityN++;
-      }
-      windowFlags.push(objAlt>=30&&dark>=0.35);
+
+      // Equivalent fully-dark hours for the whole night and for this target above 30°.
+      // This makes a 4 h early-evening target score clearly below a target usable for most of a long winter night.
+      totalDarkHours+=stepHours*dark;
+      if(objAlt>=30)effectiveHours+=stepHours*dark;
+
+      // Height is rewarded only together with actual darkness. A high culmination in twilight/daylight
+      // must not receive a full altitude component.
+      const altitudeFactor=clamp((objAlt-25)/45,0,1),altitudeQuality=dark*altitudeFactor;
+      if(altitudeQuality>bestAltitudeQuality){bestAltitudeQuality=altitudeQuality;bestImagingAltitude=objAlt;}
+
+      // Continuous window counts only genuinely dark conditions, not civil/early nautical twilight.
+      continuityFlags.push(objAlt>=30&&dark>=0.85);
+
       const objectWeight=dark*clamp((objAlt-20)/35,0,1);
       if(objectWeight>0){
         const separation=astro.sep(raDeg,decDeg,s.moonRa,s.moonDec),moonAltWeight=clamp((s.moonAlt+5)/35,0,1),separationWeight=clamp((95-separation)/80,0,1),load=s.illumination*moonAltWeight*separationWeight;
@@ -94,15 +111,50 @@
         moonWeightSum+=objectWeight;
       }
     }
-    const longestWindow=longestWindowHours(windowFlags,context.stepMinutes),darknessQuality=darknessQualityN?darknessQualitySum/darknessQualityN:0;
-    const altitudeScore=35*clamp((peakAltitude-25)/45,0,1),windowScore=35*clamp(effectiveHours/5,0,1),darknessScore=20*clamp(darknessQuality,0,1),continuityScore=10*clamp(longestWindow/4,0,1),base=altitudeScore+windowScore+darknessScore+continuityScore;
-    const moonLoad=moonWeightSum?moonWeighted/moonWeightSum:0,moonPenalty=cfg.moonMax*moonLoad,lpLoad=lightPollutionLoad(sky?.sqm),lightPollutionPenalty=cfg.lightPollutionMax*lpLoad,score=Math.round(clamp(base-moonPenalty-lightPollutionPenalty,0,100));
+
+    const coverage=totalDarkHours>0?clamp(effectiveHours/totalDarkHours,0,1):0;
+    const longestWindow=longestWindowHours(continuityFlags,context.stepMinutes);
+
+    // v0.14 score v2:
+    // 30% altitude during darkness
+    // 35% useful dark hours (full credit at 6 h)
+    // 25% fraction of the night's darkness actually covered by the target
+    // 10% continuous deep-dark window (full credit at 5 h)
+    // Moon and light pollution remain class-dependent penalties.
+    const altitudeScore=30*bestAltitudeQuality,
+          windowScore=35*clamp(effectiveHours/6,0,1),
+          coverageScore=25*coverage,
+          continuityScore=10*clamp(longestWindow/5,0,1),
+          base=altitudeScore+windowScore+coverageScore+continuityScore;
+
+    const moonLoad=moonWeightSum?moonWeighted/moonWeightSum:0,
+          moonPenalty=cfg.moonMax*moonLoad,
+          lpLoad=lightPollutionLoad(sky?.sqm),
+          lightPollutionPenalty=cfg.lightPollutionMax*lpLoad,
+          score=Math.round(clamp(base-moonPenalty-lightPollutionPenalty,0,100));
+
     return{
       score,
       label:scoreLabel(score),
       classKey:CLASS_CONFIG[classKey]?classKey:'broadband',
-      reason:`${score}/100 — ${scoreLabel(score)}; ${windowPhrase(longestWindow)}, ${altitudePhrase(peakAltitude)}, ${moonPhrase(moonPenalty)}.`,
-      metrics:{peakAltitude,effectiveHours,longestWindow,darknessQuality,moonLoad,moonPenalty,lightPollutionLoad:lpLoad,lightPollutionPenalty,base}
+      reason:`${score}/100 — ${scoreLabel(score)}; ${windowPhrase(effectiveHours)} (${effectiveHours.toFixed(1)} h), ${coveragePhrase(coverage)}, ${altitudePhrase(bestImagingAltitude)}, ${moonPhrase(moonPenalty)}.`,
+      metrics:{
+        peakAltitude:bestImagingAltitude,
+        effectiveHours,
+        totalDarkHours,
+        coverage,
+        longestWindow,
+        altitudeQuality:bestAltitudeQuality,
+        moonLoad,
+        moonPenalty,
+        lightPollutionLoad:lpLoad,
+        lightPollutionPenalty,
+        altitudeScore,
+        windowScore,
+        coverageScore,
+        continuityScore,
+        base
+      }
     };
   }
 
