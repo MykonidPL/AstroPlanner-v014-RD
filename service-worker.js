@@ -1,4 +1,4 @@
-const CACHE='astroplanner-v014-rd-recommend3';
+const CACHE='astroplanner-v014-rd-metadata1';
 const CATALOG_CACHE='astroplanner-catalog-v06';
 const CATALOG_COMMIT='ef52c7ea920191d45fe0da4711dd3b1cc9220c18';
 const CATALOG_ASSETS=[
@@ -6,7 +6,7 @@ const CATALOG_ASSETS=[
   `https://raw.githubusercontent.com/acocalypso/celestia_atlas/${CATALOG_COMMIT}/data/stellarium-dso-supplement.json`,
   `https://raw.githubusercontent.com/acocalypso/celestia_atlas/${CATALOG_COMMIT}/data/abell-pn-catalog.json`
 ];
-const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png','./zwo-cameras.json','./framing-engine.js','./star-layer.js','./dso-layer.js','./framing-renderer.js','./raster-layer.js','./recommendation-engine.js','./ui-shell.css','./ui-state.js','./bortle-indicator.js','./snapshot-store.js'];
+const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png','./zwo-cameras.json','./framing-engine.js','./star-layer.js','./dso-layer.js','./framing-renderer.js','./raster-layer.js','./target-metadata.js','./filter-profiles.js','./recommendation-engine.js','./ui-shell.css','./ui-state.js','./bortle-indicator.js','./snapshot-store.js'];
 
 async function warmCatalogCache(){
   const cache=await caches.open(CATALOG_CACHE);
