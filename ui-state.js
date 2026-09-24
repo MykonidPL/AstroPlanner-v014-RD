@@ -149,12 +149,23 @@
       #home .homeLogo{border-radius:32px}
       #home .homeAppName{margin-top:22px;font-size:22px;font-weight:800;letter-spacing:.01em;color:#f3f7ff}
       #home .homeVersion{margin-top:8px;font-size:10px;letter-spacing:.08em;color:#6f7d99}
-      .plannerRecommendationsCard{padding:14px 14px 15px}
-      .plannerRecommendationsCard .recommendationStandaloneHead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
-      .plannerRecommendationsCard .recommendationStandaloneHead h2{margin:0}
-      .plannerRecommendationsCard .plannerRecommendationEntry{margin:0;padding:0;border-top:0}
-      .plannerRecommendationsCard .plannerRecommendationEntry .secondary{width:100%;min-height:46px}
-      .plannerRecommendationsCard .plannerRecommendationsWrap{margin-top:12px}
+      #plannerRecommendationsCard.plannerPanel{padding:0;overflow:hidden}
+      #plannerRecommendationsCard .plannerRecommendationEntry{margin:0;padding:0;border-top:0}
+      #plannerRecommendationsCard .plannerRecommendationEntry .secondary{width:100%;min-height:46px}
+      #plannerRecommendationsCard .plannerRecommendationLead{line-height:1.55;margin:0 0 12px;color:var(--muted);font-size:12px}
+      #plannerRecommendationsCard .plannerRecommendationsWrap{margin-top:12px}
+      #plannerRecommendationsCard .recommendationContext{display:none!important}
+      #plannerRecommendationsCard .recommendationStatus[data-ui-hidden="1"]{display:none!important}
+      .currentScoreMetric{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;text-align:center}
+      .currentScoreMetric .k{align-self:stretch;text-align:left}
+      .currentScoreRing{--score:0;--ring:var(--accent);position:relative;width:64px;height:64px;margin:5px auto 2px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--ring) calc(var(--score)*1%),rgba(106,167,255,.13) 0)}
+      .currentScoreRing::before{content:"";position:absolute;inset:5px;border-radius:50%;background:#0b1221}
+      .currentScoreRingValue{position:relative;z-index:1;font-size:20px;font-weight:850;line-height:1;color:#eef3ff}
+      .currentScoreRingValue small{display:block;margin-top:2px;font-size:9px;font-weight:700;color:var(--muted)}
+      .currentScoreMetric .scoreCaption{font-size:10px;color:var(--muted);margin-top:2px;line-height:1.2}
+      .currentScoreMetric.scoreBad .currentScoreRing{--ring:var(--bad)}
+      .currentScoreMetric.scoreWarn .currentScoreRing{--ring:var(--warn)}
+      .currentScoreMetric.scoreGood .currentScoreRing{--ring:var(--good)}
     `;
     document.head.appendChild(style);
   }
@@ -176,22 +187,10 @@
     const wrap=document.getElementById('plannerRecommendationsWrap');
     if(!night||!analysis||!button||!wrap)return;
 
+    const oldCard=button.closest('.card');
+    const oldLead=oldCard?.querySelector('.plannerRecommendationLead');
     let card=document.getElementById('plannerRecommendationsCard');
-    const existingCard=button.closest('.card');
-    if(!card&&existingCard&&existingCard!==night&&existingCard!==analysis){
-      card=existingCard;
-      card.id='plannerRecommendationsCard';
-      card.classList.add('plannerRecommendationsCard');
-    }
-    if(!card){
-      card=document.createElement('section');
-      card.id='plannerRecommendationsCard';
-      card.className='card plannerRecommendationsCard';
-      const head=document.createElement('div');
-      head.className='recommendationStandaloneHead';
-      head.innerHTML='<h2>Co fotografować?</h2><span class="small">ranking nocy</span>';
-      card.appendChild(head);
-    }
+    if(card&&card.tagName!=='DETAILS')card=null;
 
     let entry=button.closest('.plannerRecommendationEntry');
     if(!entry){
@@ -200,12 +199,159 @@
       button.parentNode?.insertBefore(entry,button);
       entry.appendChild(button);
     }
-    if(!card.contains(entry))card.appendChild(entry);
-    if(!card.contains(wrap))card.appendChild(wrap);
+    button.textContent='Pokaż rekomendacje';
 
-    /* Remove an obsolete empty recommendation container left in Warunki nocy. */
+    if(!card){
+      card=document.createElement('details');
+      card.id='plannerRecommendationsCard';
+      card.className='card plannerPanel plannerRecommendationsCard';
+      card.innerHTML='<summary><span>Co fotografować?</span><small>ranking nocy</small></summary><div class="plannerPanelBody"></div>';
+      const body=card.querySelector('.plannerPanelBody');
+      const lead=oldLead||document.createElement('div');
+      if(!oldLead){lead.className='plannerRecommendationLead';lead.textContent='Nie wiesz, który projekt wybrać? Ranking porówna aktywne i planowane cele dla bieżącej daty, lokalizacji i ustawień nocy.';}
+      body.appendChild(lead);
+      body.appendChild(entry);
+      body.appendChild(wrap);
+      if(oldCard&&oldCard!==night&&oldCard!==analysis)oldCard.replaceWith(card);
+      else analysis.parentNode.insertBefore(card,analysis);
+      card.open=false;
+    }else{
+      const body=card.querySelector('.plannerPanelBody');
+      if(body){if(!body.contains(entry))body.appendChild(entry);if(!body.contains(wrap))body.appendChild(wrap);}
+    }
+
     night.querySelectorAll('.plannerRecommendationEntry').forEach(el=>{if(el!==entry&&!el.children.length)el.remove();});
     if(card.nextElementSibling!==analysis)analysis.parentNode.insertBefore(card,analysis);
+    syncRecommendationStatusVisibility();
+  }
+
+  function syncRecommendationStatusVisibility(){
+    const context=document.getElementById('recommendContext');
+    if(context)context.style.display='none';
+    const status=document.getElementById('recommendStatus');
+    if(!status)return;
+    const update=()=>{
+      const text=String(status.textContent||'').trim();
+      const technical=!text||text.startsWith('Score:')||text.startsWith('Otwórz ranking');
+      status.dataset.uiHidden=technical?'1':'0';
+    };
+    update();
+    if(!status.__uiObserver){status.__uiObserver=new MutationObserver(update);status.__uiObserver.observe(status,{childList:true,subtree:true,characterData:true});}
+  }
+
+  function cleanPlannerMapInfo(){
+    const info=document.getElementById('plannerMapInfo');
+    if(!info||!info.innerHTML.includes('Mapa działa już teraz.'))return;
+    info.innerHTML=info.innerHTML.replace('Mapa działa już teraz. Wybierz setup kadru, aby dołożyć rzeczywisty FOV.','Wybierz setup, aby wyświetlić FOV.');
+  }
+
+  function patchPlannerMapInfo(){
+    const base=window.renderPlannerMap;
+    if(typeof base!=='function'||base.__uiMapInfoPatched)return;
+    const wrapped=function(...args){const out=base.apply(this,args);cleanPlannerMapInfo();return out;};
+    wrapped.__uiMapInfoPatched=true;
+    window.renderPlannerMap=wrapped;
+    cleanPlannerMapInfo();
+  }
+
+  let currentScoreSeq=0;
+  const currentScoreSkyCache=new Map();
+  function scoreClass(score){return score>=65?'scoreGood':score>=25&&score<45?'scoreWarn':score<25?'scoreBad':'';}
+  function scoreCaption(score){return score>=85?'bardzo dobre':score>=65?'dobre':score>=45?'umiarkowane':score>=25?'słabe':'bardzo słabe';}
+
+  function ensureCurrentScoreMetric(){
+    const metrics=document.getElementById('metrics');
+    if(!metrics||!metrics.children.length)return null;
+    let slot=metrics.querySelector('.currentScoreMetric');
+    if(slot)return slot;
+    const projectSlot=[...metrics.children].find(el=>String(el.querySelector?.('.k')?.textContent||'').trim()==='Projekt');
+    slot=projectSlot||document.createElement('div');
+    slot.className='metric currentScoreMetric';
+    if(!projectSlot)metrics.appendChild(slot);
+    return slot;
+  }
+
+  function paintCurrentScore(slot,result){
+    if(!slot)return;
+    if(!result||!Number.isFinite(Number(result.score))){
+      slot.className='metric currentScoreMetric';
+      slot.innerHTML='<div class="k">Score</div><div class="currentScoreRing" style="--score:0"><div class="currentScoreRingValue">—<small>/100</small></div></div><div class="scoreCaption">brak danych</div>';
+      return;
+    }
+    const score=Math.max(0,Math.min(100,Math.round(Number(result.score))));
+    slot.className=`metric currentScoreMetric ${scoreClass(score)}`;
+    slot.title=String(result.reason||'');
+    slot.innerHTML=`<div class="k">Score</div><div class="currentScoreRing" style="--score:${score}"><div class="currentScoreRingValue">${score}<small>/100</small></div></div><div class="scoreCaption">${scoreCaption(score)}</div>`;
+  }
+
+  async function currentScoreSky(lat,lon){
+    const key=`${Number(lat).toFixed(5)},${Number(lon).toFixed(5)}`;
+    if(currentScoreSkyCache.has(key))return currentScoreSkyCache.get(key);
+    const task=(async()=>{
+      for(let i=0;i<12;i++){
+        if(window.AstroBortle?.estimateAt){try{return await window.AstroBortle.estimateAt(Number(lat),Number(lon));}catch(_){return null;}}
+        await new Promise(resolve=>setTimeout(resolve,100));
+      }
+      return null;
+    })();
+    currentScoreSkyCache.set(key,task);
+    const result=await task;
+    currentScoreSkyCache.set(key,Promise.resolve(result));
+    return result;
+  }
+
+  function scoreSubject(){
+    let project=null;
+    try{if(typeof window.plannerProject==='function')project=window.plannerProject();}catch(_){project=null;}
+    if(project)return project;
+    const prefs=window.__prefs?.target||{};
+    const name=String(prefs.name||document.getElementById('selectedObject')?.dataset?.name||'').trim();
+    const ra=String(document.getElementById('raInput')?.value||prefs.ra||'').trim();
+    const dec=String(document.getElementById('decInput')?.value||prefs.dec||'').trim();
+    if(!name||!ra||!dec)return null;
+    return{
+      name,
+      profileId:String(document.getElementById('newProjectProfile')?.value||''),
+      target:{name,ra,dec,type:prefs.type||'',catalog:prefs.catalog||''}
+    };
+  }
+
+  async function updateCurrentTargetScore(plan){
+    const seq=++currentScoreSeq;
+    const slot=ensureCurrentScoreMetric();
+    if(!slot)return;
+    paintCurrentScore(slot,null);
+    const api=window.AstroRecommend,metaApi=window.AstroTargetMetadata,filterApi=window.AstroFilterProfiles;
+    const raParser=window.parseRA,decParser=window.parseDec,dateFn=window.sessionDate;
+    const astro={altitude:window.altitude,sunPos:window.sunPos,moonPos:window.moonPos,sep:window.sep};
+    if(!api||!metaApi||!filterApi||typeof raParser!=='function'||typeof decParser!=='function'||typeof dateFn!=='function'||Object.values(astro).some(fn=>typeof fn!=='function'))return;
+    const raDeg=raParser(document.getElementById('raInput')?.value),decDeg=decParser(document.getElementById('decInput')?.value),lat=Number(document.getElementById('latInput')?.value),lon=Number(document.getElementById('lonInput')?.value),minAltitudeDeg=Number(document.getElementById('minAltInput')?.value),sunLimitDeg=Number(document.getElementById('nightMode')?.value),date=dateFn();
+    if(!date||![raDeg,decDeg,lat,lon,minAltitudeDeg,sunLimitDeg].every(Number.isFinite))return;
+    const subject=scoreSubject();if(!subject)return;
+    let context,metadata,material;
+    try{
+      context=api.buildContext({date,lat,lon,astro,stepMinutes:5});
+      const pool=typeof window.catalogObjectPool==='function'?window.catalogObjectPool():[];
+      metadata=metaApi.projectMetadata(subject,pool);
+      const equipment=typeof window.getEquipment==='function'?window.getEquipment():undefined;
+      material=filterApi.projectProfile(subject,equipment);
+    }catch(e){console.warn('Current target score setup failed',e);return;}
+    const sky=await currentScoreSky(lat,lon);if(seq!==currentScoreSeq)return;
+    try{
+      const result=api.scoreTarget({raDeg,decDeg,classKey:metadata.photoClass,metadata,materialProfile:material,context,astro,sky,minAltitudeDeg,sunLimitDeg});
+      if(seq!==currentScoreSeq)return;
+      paintCurrentScore(slot,result);
+      window.__currentTargetScore=result;
+    }catch(e){console.warn('Current target score failed',e);}
+  }
+
+  function installCurrentTargetScore(){
+    const base=window.calculate;
+    if(typeof base!=='function'||base.__uiScorePatched)return;
+    const wrapped=function(...args){const plan=base.apply(this,args);setTimeout(()=>updateCurrentTargetScore(plan),0);return plan;};
+    wrapped.__uiScorePatched=true;
+    window.calculate=wrapped;
+    if(window.__lastPlan)setTimeout(()=>updateCurrentTargetScore(window.__lastPlan),0);
   }
 
   /* Curated photographic identity can differ from the catalogue component carrying
@@ -242,13 +388,24 @@
     api.__componentPhotometryPatched=true;
   }
 
-  function applyV014Layout(){ensureLayoutStyle();simplifyHome();placeRecommendationsBetweenNightAndAnalysis();patchComponentPhotometry();}
+  function applyV014Layout(){
+    ensureLayoutStyle();
+    simplifyHome();
+    placeRecommendationsBetweenNightAndAnalysis();
+    syncRecommendationStatusVisibility();
+    patchPlannerMapInfo();
+    patchComponentPhotometry();
+    installCurrentTargetScore();
+  }
 
   document.addEventListener('DOMContentLoaded',()=>setTimeout(restoreAll,0));
   document.addEventListener('DOMContentLoaded',()=>setTimeout(loadBortleIndicator,0));
   document.addEventListener('DOMContentLoaded',()=>setTimeout(applyV014Layout,0));
   document.addEventListener('input',e=>{if(persistable(e.target))scheduleSave();},true);
-  document.addEventListener('change',e=>{if(persistable(e.target)||e.target?.matches?.('main details')&&!transientUi(e.target))scheduleSave();},true);
+  document.addEventListener('change',e=>{
+    if(persistable(e.target)||e.target?.matches?.('main details')&&!transientUi(e.target))scheduleSave();
+    if(['newProjectProfile','plannerMapProfileSelect'].includes(e.target?.id)&&window.__lastPlan)setTimeout(()=>updateCurrentTargetScore(window.__lastPlan),0);
+  },true);
   document.addEventListener('toggle',e=>{if(e.target?.matches?.('main details')&&!transientUi(e.target))scheduleSave();},true);
   document.addEventListener('click',e=>{
     const id=e.target?.closest?.('button')?.id;
