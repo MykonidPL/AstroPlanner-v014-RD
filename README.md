@@ -36,6 +36,14 @@ Nowa instalacja startuje z pustą biblioteką teleskopów, kamer, filtrów, kore
 
 ## Historia zmian
 
+### v0.14 R&D — spójność Score Analiza ↔ ranking
+
+- Score bieżącego projektu używa teraz tych samych współrzędnych projektu co ranking (w tym zapisanego środka kadru, jeśli istnieje),
+- Analiza przygotowuje metadane sygnału przed liczeniem Score tak samo jak ranking,
+- usunięto dodatkowy cache SQM/Bortle w Score bieżącego celu, który mógł trwale zapamiętać chwilowy brak danych i liczyć bez SQM,
+- wzór `AstroRecommend.scoreTarget()` pozostaje bez zmian; poprawka ujednolica wyłącznie dane wejściowe,
+- cache PWA R&D: `astroplanner-v014-rd-score-consistency1`.
+
 ### v0.14 R&D — przywrócenie ciągłej warstwy DSS2 HiPS
 
 - usunięto regresję wprowadzoną przez walidowanie i wygaszanie rastra po każdej zmianie viewportu; pan i zoom ponownie korzystają z ciągłej, żywej warstwy Aladin HiPS,

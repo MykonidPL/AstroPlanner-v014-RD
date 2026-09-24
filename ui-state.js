@@ -255,7 +255,6 @@
   }
 
   let currentScoreSeq=0;
-  const currentScoreSkyCache=new Map();
   function scoreClass(score){return score>=65?'scoreGood':score>=25&&score<45?'scoreWarn':score<25?'scoreBad':'';}
   function scoreCaption(score){return score>=85?'bardzo dobre':score>=65?'dobre':score>=45?'umiarkowane':score>=25?'słabe':'bardzo słabe';}
 
@@ -285,19 +284,18 @@
   }
 
   async function currentScoreSky(lat,lon){
-    const key=`${Number(lat).toFixed(5)},${Number(lon).toFixed(5)}`;
-    if(currentScoreSkyCache.has(key))return currentScoreSkyCache.get(key);
-    const task=(async()=>{
-      for(let i=0;i<12;i++){
-        if(window.AstroBortle?.estimateAt){try{return await window.AstroBortle.estimateAt(Number(lat),Number(lon));}catch(_){return null;}}
-        await new Promise(resolve=>setTimeout(resolve,100));
+    // AstroBortle already owns the persistent/browser cache. Do not keep a second
+    // Score-only cache here: a transient null/error used to become permanent for
+    // this lat/lon and could make Analysis score without SQM while the ranking
+    // recomputed the same project with SQM a moment later.
+    for(let i=0;i<12;i++){
+      if(window.AstroBortle?.estimateAt){
+        try{return await window.AstroBortle.estimateAt(Number(lat),Number(lon));}
+        catch(_){return null;}
       }
-      return null;
-    })();
-    currentScoreSkyCache.set(key,task);
-    const result=await task;
-    currentScoreSkyCache.set(key,Promise.resolve(result));
-    return result;
+      await new Promise(resolve=>setTimeout(resolve,100));
+    }
+    return null;
   }
 
   function scoreSubject(){
@@ -325,20 +323,38 @@
     const raParser=window.parseRA,decParser=window.parseDec,dateFn=window.sessionDate;
     const astro={altitude:window.altitude,sunPos:window.sunPos,moonPos:window.moonPos,sep:window.sep};
     if(!api||!metaApi||!filterApi||typeof raParser!=='function'||typeof decParser!=='function'||typeof dateFn!=='function'||Object.values(astro).some(fn=>typeof fn!=='function'))return;
-    const raDeg=raParser(document.getElementById('raInput')?.value),decDeg=decParser(document.getElementById('decInput')?.value),lat=Number(document.getElementById('latInput')?.value),lon=Number(document.getElementById('lonInput')?.value),minAltitudeDeg=Number(document.getElementById('minAltInput')?.value),sunLimitDeg=Number(document.getElementById('nightMode')?.value),date=dateFn();
-    if(!date||![raDeg,decDeg,lat,lon,minAltitudeDeg,sunLimitDeg].every(Number.isFinite))return;
+
+    const lat=Number(document.getElementById('latInput')?.value),lon=Number(document.getElementById('lonInput')?.value),minAltitudeDeg=Number(document.getElementById('minAltInput')?.value),sunLimitDeg=Number(document.getElementById('nightMode')?.value),date=dateFn();
+    if(!date||![lat,lon,minAltitudeDeg,sunLimitDeg].every(Number.isFinite))return;
     const subject=scoreSubject();if(!subject)return;
+
+    // For a loaded project use exactly the same sky coordinates as the ranking.
+    // recommendationProjectCoords() intentionally prefers the saved framing centre
+    // when the project has one; the previous Analysis path always used target RA/Dec.
+    let coords=null;
+    try{if(typeof window.recommendationProjectCoords==='function'&&typeof window.plannerProject==='function'&&window.plannerProject())coords=window.recommendationProjectCoords(subject);}catch(_){coords=null;}
+    if(!coords){
+      const raDeg=raParser(document.getElementById('raInput')?.value),decDeg=decParser(document.getElementById('decInput')?.value);
+      if(![raDeg,decDeg].every(Number.isFinite))return;
+      coords={raDeg,decDeg};
+    }
+
     let context,metadata,material;
     try{
       context=api.buildContext({date,lat,lon,astro,stepMinutes:5});
       const pool=typeof window.catalogObjectPool==='function'?window.catalogObjectPool():[];
+      // Ranking prepares signal metadata before scoring. Do the same in Analysis so
+      // an object cannot be scored once with fallback metadata and once with the
+      // indexed/supplemented catalogue metadata.
+      if(typeof metaApi.prepareSignalData==='function')await metaApi.prepareSignalData([subject],pool);
+      if(seq!==currentScoreSeq)return;
       metadata=metaApi.projectMetadata(subject,pool);
       const equipment=typeof window.getEquipment==='function'?window.getEquipment():undefined;
       material=filterApi.projectProfile(subject,equipment);
     }catch(e){console.warn('Current target score setup failed',e);return;}
     const sky=await currentScoreSky(lat,lon);if(seq!==currentScoreSeq)return;
     try{
-      const result=api.scoreTarget({raDeg,decDeg,classKey:metadata.photoClass,metadata,materialProfile:material,context,astro,sky,minAltitudeDeg,sunLimitDeg});
+      const result=api.scoreTarget({...coords,classKey:metadata.photoClass,metadata,materialProfile:material,context,astro,sky,minAltitudeDeg,sunLimitDeg});
       if(seq!==currentScoreSeq)return;
       paintCurrentScore(slot,result);
       window.__currentTargetScore=result;
