@@ -1,4 +1,4 @@
-/* AstroPlanner v0.14 R&D — persistent shell state; Planner workspace and Journal browsing state are intentionally transient */
+/* AstroPlanner v0.14 R&D — persistent shell state; Planner workspace, Journal browsing and recommendations are intentionally transient */
 (()=>{
   'use strict';
   const STORAGE_PREFIX='aprd014:';
@@ -21,7 +21,8 @@
 
   function inPlanner(el){return !!el?.closest?.('#planner');}
   function inJournal(el){return !!el?.closest?.('#journal');}
-  function transientUi(el){return inPlanner(el)||inJournal(el);}
+  function inRecommendations(el){return !!el?.closest?.('#recommendations');}
+  function transientUi(el){return inPlanner(el)||inJournal(el)||inRecommendations(el);}
   function persistable(el){
     if(!el?.id||transientUi(el))return false;
     if(el.type==='file'||el.type==='hidden'||el.type==='button'||el.type==='submit')return false;

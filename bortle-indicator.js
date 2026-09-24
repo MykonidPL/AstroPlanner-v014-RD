@@ -240,6 +240,23 @@
     return activeRequest;
   }
 
+  async function estimateAt(lat,lon,options={}){
+    lat=parseCoord(lat);lon=parseCoord(lon);
+    if(!validCoords(lat,lon))return null;
+    const cached=!options.force?cachedEstimate(lat,lon):null;
+    if(cached)return cached;
+    const ctrl=typeof AbortController!=='undefined'?new AbortController():null;
+    const timer=ctrl?setTimeout(()=>ctrl.abort(),REQUEST_TIMEOUT):null;
+    try{
+      const estimate=await resolveEstimate(lat,lon,ctrl?.signal);
+      writeCache(coordKey(lat,lon),estimate);
+      return estimate;
+    }catch(e){
+      console.warn('AstroPlanner sky-brightness estimateAt',e);
+      return null;
+    }finally{if(timer)clearTimeout(timer);}
+  }
+
   function scheduleInputRefresh(){
     current=null;
     render('empty');
@@ -278,6 +295,7 @@
 
   window.AstroBortle={
     refresh,
+    estimateAt,
     getCurrent:()=>current?{...current}:null
   };
 
