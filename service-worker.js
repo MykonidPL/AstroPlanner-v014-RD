@@ -1,4 +1,4 @@
-const CACHE='astroplanner-v014-rd-recommend2';
+const CACHE='astroplanner-v014-rd-recommend3';
 const CATALOG_CACHE='astroplanner-catalog-v06';
 const CATALOG_COMMIT='ef52c7ea920191d45fe0da4711dd3b1cc9220c18';
 const CATALOG_ASSETS=[
