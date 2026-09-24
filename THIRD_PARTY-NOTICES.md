@@ -73,13 +73,16 @@ https://github.com/acocalypso/celestia_atlas
 
 The derived catalogue files retain their upstream/data-set licensing. AstroPlanner's local cache is only a delivery mechanism and does not change those terms.
 
-## NordAPI light-pollution estimate
+## David Lorenz Light Pollution Atlas 2025
 
-- Service: NordAPI — Science & Space / Light Pollution Estimate
-- Endpoint used at runtime: `https://nordapi.ee/api/v1/lightpollution`
-- Documentation: https://nordapi.ee/docs/science
-- Authentication: no API key required for the public free endpoint at the time of integration
+- Atlas / model: David Lorenz, *Light Pollution Atlas*
+- Information and methodology: https://djlorenz.github.io/astronomy/lp/
+- Public source repository: https://github.com/djlorenz/djlorenz.github.io
+- Data year used by AstroPlanner R&D: **2025**
+- Underlying light-source input: annual VIIRS nighttime-light data processed by the Earth Observation Group (Colorado School of Mines), as described by the atlas author
 
-AstroPlanner uses this endpoint only to show a small **approximate Bortle indicator** for the latitude/longitude currently selected in the Planner. The request sends those coordinates to NordAPI when an estimate is not already present in the local cache. Results are cached locally in the browser to reduce repeated requests.
+AstroPlanner R&D reads the atlas's public compressed binary tiles at runtime for the selected latitude/longitude and reproduces the point-decoding formula published in the atlas viewer. The result used internally is modeled artificial **zenith sky brightness** (Light Pollution Index and derived mag/arcsec²), not a direct on-site measurement. Results for previously queried coordinates are cached locally in the browser.
 
-NordAPI documents this value as a population-based estimate derived from weighted nearby population within 100 km. It is **not** a satellite light-pollution measurement and is **not** an on-site SQM reading. AstroPlanner therefore presents the value as `Bortle ≈ X` and does not treat it as an exact measurement. Failure of the external service does not block Planner calculations, saved locations, GPS, projects or sessions.
+The atlas author explicitly distinguishes zenith brightness from the **Bortle Scale**, which is a subjective visual classification of the whole sky. AstroPlanner therefore does **not** treat the atlas value as a measured Bortle class. The compact UI label `Bortle ≈ X` is an AstroPlanner-only approximate shorthand derived from modeled zenith brightness using conventional SQM/Bortle ranges; the approximation symbol is intentional. Internally, the continuous modeled brightness value is retained so later recommendation scoring does not need to depend on the coarse Bortle label.
+
+No map, raster visualization or atlas imagery is displayed in AstroPlanner by this feature. Failure to load the external atlas tile does not block Planner calculations, saved locations, GPS, projects or sessions.
