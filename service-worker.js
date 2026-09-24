@@ -1,4 +1,4 @@
-const CACHE='astroplanner-v014-rd-home-nav1';
+const CACHE='astroplanner-v014-rd-signal-score1';
 const CATALOG_CACHE='astroplanner-catalog-v06';
 const CATALOG_COMMIT='ef52c7ea920191d45fe0da4711dd3b1cc9220c18';
 const CATALOG_ASSETS=[
@@ -16,45 +16,17 @@ async function warmCatalogCache(){
     const old=await legacy.match(url);
     if(old){await cache.put(url,old.clone());return;}
     const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),12000);
-    try{
-      const r=await fetch(url,{cache:'no-cache',mode:'cors',signal:ctrl.signal});
-      if(r.ok)await cache.put(url,r.clone());
-    }catch(e){}finally{clearTimeout(timer);}
+    try{const r=await fetch(url,{cache:'no-cache',mode:'cors',signal:ctrl.signal});if(r.ok)await cache.put(url,r.clone());}catch(e){}finally{clearTimeout(timer);}
   }));
-  const ready=(await Promise.all(CATALOG_ASSETS.map(url=>cache.match(url)))).every(Boolean);
-  if(ready)await caches.delete('astroplanner-catalog-v05');
+  const ready=(await Promise.all(CATALOG_ASSETS.map(url=>cache.match(url)))).every(Boolean);if(ready)await caches.delete('astroplanner-catalog-v05');
 }
-
 self.addEventListener('message',e=>{if(e.data==='SKIP_WAITING')self.skipWaiting();});
-self.addEventListener('install',e=>e.waitUntil(Promise.all([
-  caches.open(CACHE).then(c=>c.addAll(ASSETS)),
-  warmCatalogCache()
-]).then(()=>self.skipWaiting())));
-self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(
-  keys.filter(k=>k.startsWith('astroplanner-v014-rd-')&&k!==CACHE).map(k=>caches.delete(k))
-)).then(()=>self.clients.claim())));
+self.addEventListener('install',e=>e.waitUntil(Promise.all([caches.open(CACHE).then(c=>c.addAll(ASSETS)),warmCatalogCache()]).then(()=>self.skipWaiting())));
+self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('astroplanner-v014-rd-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{
-  if(e.request.method!=='GET')return;
-  const u=new URL(e.request.url);
-  if(CATALOG_ASSETS.includes(e.request.url)){
-    e.respondWith(caches.open(CATALOG_CACHE).then(async c=>{
-      const cached=await c.match(e.request);
-      if(cached)return cached;
-      try{
-        const r=await fetch(e.request);
-        if(r&&r.ok)await c.put(e.request,r.clone());
-        return r;
-      }catch(e){return Response.error();}
-    }));
-    return;
-  }
+  if(e.request.method!=='GET')return;const u=new URL(e.request.url);
+  if(CATALOG_ASSETS.includes(e.request.url)){e.respondWith(caches.open(CATALOG_CACHE).then(async c=>{const cached=await c.match(e.request);if(cached)return cached;try{const r=await fetch(e.request);if(r&&r.ok)await c.put(e.request,r.clone());return r;}catch(e){return Response.error();}}));return;}
   const nav=e.request.mode==='navigate'||u.pathname.endsWith('/index.html')||u.pathname.endsWith('/');
-  if(nav){
-    e.respondWith(fetch(e.request,{cache:'no-store'}).then(r=>{const cp=r.clone();caches.open(CACHE).then(c=>c.put('./index.html',cp));return r;}).catch(()=>caches.match('./index.html')));
-    return;
-  }
-  e.respondWith(caches.match(e.request).then(cached=>cached||fetch(e.request).then(r=>{
-    if(r&&r.ok&&u.origin===location.origin){const cp=r.clone();caches.open(CACHE).then(c=>c.put(e.request,cp));}
-    return r;
-  })));
+  if(nav){e.respondWith(fetch(e.request,{cache:'no-store'}).then(r=>{const cp=r.clone();caches.open(CACHE).then(c=>c.put('./index.html',cp));return r;}).catch(()=>caches.match('./index.html')));return;}
+  e.respondWith(caches.match(e.request).then(cached=>cached||fetch(e.request).then(r=>{if(r&&r.ok&&u.origin===location.origin){const cp=r.clone();caches.open(CACHE).then(c=>c.put(e.request,cp));}return r;})));
 });
