@@ -1,4 +1,4 @@
-/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.
+/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.1.
  * Classification is deterministic from the loaded catalogues. Signal metadata is
  * deliberately type-aware: integrated magnitude / mean surface brightness for
  * extended continuum targets, Lynds opacity for dark nebulae, and explicit
@@ -121,11 +121,27 @@
     const areaArcsec2=Math.PI*(majorArcmin*60)*(minorArcmin*60)/4;
     return areaArcsec2>0?mag+2.5*Math.log10(areaArcsec2):null;
   }
-  function signalFromObject(obj={},base={}){
-    const props=obj.properties||{},axes=objectAxes(obj);
-    const magnitude=finite(obj.mag,obj.magnitude,obj.vMag,obj.vmag,props.magnitude,props.vMagnitude,props.bMagnitude,props.mag,props.vMag);
+
+  const STELLAR_PHYSICAL=new Set(['open-cluster','globular-cluster','stellar-association','star','double-star']);
+  const NEBULAR_PHYSICAL=new Set(['reflection-nebula','emission-nebula','hii-region','planetary-nebula','supernova-remnant','dark-nebula','cluster-nebulosity','nebula-unspecified']);
+  function photometryRole(base={},rawBase=null,override=null){
+    if(override&&rawBase&&STELLAR_PHYSICAL.has(rawBase.physicalType)&&NEBULAR_PHYSICAL.has(base.physicalType))return'stellar-component';
+    if(base.physicalType==='dark-nebula')return'absorption-component';
+    if(base.signalKind==='line')return'line-emission';
+    return'whole-object';
+  }
+
+  function signalFromObject(obj={},base={},options={}){
+    const props=obj.properties||{},axes=objectAxes(obj),photometryAppliesTo=options.photometryAppliesTo||'whole-object';
+    const catalogMagnitude=finite(obj.mag,obj.magnitude,obj.vMag,obj.vmag,props.magnitude,props.vMagnitude,props.bMagnitude,props.mag,props.vMag);
     const magnitudeBand=String(obj.magBand||obj.magnitudeBand||props.magnitudeBand||'').trim()||null;
-    const catalogSurface=finite(obj.surfaceBrightness,props.surfaceBrightness,props.surfaceBrightnessMagArcsec2);
+    const catalogSurfaceRaw=finite(obj.surfaceBrightness,props.surfaceBrightness,props.surfaceBrightnessMagArcsec2);
+    const componentMismatch=photometryAppliesTo==='stellar-component';
+    // If the catalogue photometry describes a stellar component (e.g. M45 as an open cluster)
+    // while the photographic target is curated as nebulosity/dust, it must never be used as
+    // the brightness of that nebulosity. Keep the raw value only for auditability.
+    const magnitude=componentMismatch?null:catalogMagnitude;
+    const catalogSurface=componentMismatch?null:catalogSurfaceRaw;
     const derivedSurface=meanSurfaceBrightness(magnitude,axes.majorArcmin,axes.minorArcmin);
     const opacityRaw=finite(obj.opacityClass,props.opacityClass),opacityClass=opacityRaw!=null&&opacityRaw>=1&&opacityRaw<=6?Math.round(opacityRaw):null;
     // Feitzinger & Stüwe (1986): A_V = 0.724 * opacity class + 0.5 mag, approximately consistent with Lynds.
@@ -133,15 +149,18 @@
     const absorptionContrast=extinctionAv!=null?1-Math.pow(10,-0.4*extinctionAv):null;
     const useSurface=['galaxy','galaxy-pair','galaxy-triplet','reflection-nebula'].includes(base.physicalType);
     let model='unknown',confidence='low';
-    if(base.physicalType==='dark-nebula'&&opacityClass!=null){model='dark-opacity';confidence='medium';}
+    if(componentMismatch){model='component-mismatch';confidence='low';}
+    else if(base.physicalType==='dark-nebula'&&opacityClass!=null){model='dark-opacity';confidence='medium';}
     else if(useSurface&&Number.isFinite(catalogSurface)){model='surface-brightness';confidence='high';}
     else if(useSurface&&Number.isFinite(derivedSurface)){model='surface-brightness';confidence='medium';}
     else if(base.signalKind==='line'){model='line-flux-missing';confidence='low';}
     else if(Number.isFinite(magnitude)){model='integrated-magnitude';confidence='medium';}
     return Object.freeze({
-      model,confidence,integratedMagnitude:magnitude,magnitudeBand,
+      model,confidence,photometryAppliesTo,
+      integratedMagnitude:magnitude,catalogIntegratedMagnitude:catalogMagnitude,magnitudeBand,
       majorArcmin:axes.majorArcmin,minorArcmin:axes.minorArcmin,
       surfaceBrightnessMagArcsec2:Number.isFinite(catalogSurface)?catalogSurface:(Number.isFinite(derivedSurface)?derivedSurface:null),
+      catalogSurfaceBrightnessMagArcsec2:catalogSurfaceRaw,
       surfaceBrightnessSource:Number.isFinite(catalogSurface)?'catalog':(Number.isFinite(derivedSurface)?'derived-from-magnitude-and-size':null),
       opacityClass,extinctionAv,absorptionContrast
     });
@@ -155,10 +174,10 @@
   function metadataForObject(obj={}){
     const key=stableCacheKey(obj);if(metadataCache.has(key))return metadataCache.get(key);
     const override=curatedFor(obj),typeCode=String(obj.typeCode||obj.objectType||'').trim(),codeMeta=TYPE_META[typeCode]||null,groupMeta=metaFromGroups(obj.groups||obj.catalogueGroups,obj.catalog||obj.catalogSource),textMeta=metaFromText(obj.type||obj.typeName||obj.typeLabel);
-    const base=override||codeMeta||groupMeta||textMeta||TYPE_META.Other;
+    const rawBase=codeMeta||groupMeta||textMeta||null,base=override||rawBase||TYPE_META.Other;
     const source=override?'curated':codeMeta?'catalog-type':groupMeta?'catalog-group':textMeta?'catalog-text':'fallback';
     let confidence=override||codeMeta?'high':groupMeta||textMeta?'medium':'low';if(typeCode==='Neb'||typeCode==='Other'||typeCode==='Cl+N')confidence=override?'high':'low';
-    const signal=signalFromObject(obj,base);
+    const signal=signalFromObject(obj,base,{photometryAppliesTo:photometryRole(base,rawBase,override)});
     const meta=Object.freeze({physicalType:base.physicalType,physicalLabel:PHYSICAL_LABELS[base.physicalType]||PHYSICAL_LABELS.other,photoClass:base.photoClass,photoClassLabel:CLASS_LABELS[base.photoClass]||CLASS_LABELS.mixed,signalKind:base.signalKind,confidence,source,rawTypeCode:typeCode||null,rawType:String(obj.type||obj.typeName||obj.typeLabel||'')||null,catalog:String(obj.catalog||obj.catalogSource||''),groups:Array.isArray(obj.groups)?[...obj.groups]:Array.isArray(obj.catalogueGroups)?[...obj.catalogueGroups]:[],identities:identityTokens(obj),curatedIdentity:override?.identity||null,signal});
     metadataCache.set(key,meta);return meta;
   }
@@ -211,6 +230,7 @@
 
   function signalSummary(meta){
     const s=meta?.signal||{};
+    if(s.model==='component-mismatch')return'fotometria katalogowa dotyczy składnika gwiazdowego, nie pyłu/refleksów';
     if(s.model==='surface-brightness'&&Number.isFinite(s.surfaceBrightnessMagArcsec2)){const src=s.surfaceBrightnessSource==='catalog'?'katalogowa':'wyliczona z magnitudo i rozmiaru';return`μ ≈ ${s.surfaceBrightnessMagArcsec2.toFixed(2)} mag/arcsec² (${src})`;}
     if(s.model==='dark-opacity'&&Number.isFinite(s.opacityClass))return`opacity ${s.opacityClass}/6 · Aᵥ ≈ ${s.extinctionAv.toFixed(1)} mag`;
     if(Number.isFinite(s.integratedMagnitude))return`m ≈ ${s.integratedMagnitude.toFixed(2)}${s.magnitudeBand?` ${s.magnitudeBand}`:''}`;
