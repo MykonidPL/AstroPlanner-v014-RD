@@ -26,7 +26,7 @@
   function persistable(el){
     if(!el?.id||transientUi(el))return false;
     if(el.type==='file'||el.type==='hidden'||el.type==='button'||el.type==='submit')return false;
-    if(el.closest('#sessionModal'))return false; // session keeps its own dedicated draft
+    if(el.closest('#sessionModal'))return false;
     return !!el.closest('main');
   }
   function collectValues(){
@@ -75,7 +75,7 @@
       if(el&&!transientUi(el))values[id]=value;
     }
     draft={schema:SCHEMA,values,savedAt:Date.now()};
-    writeJson(DRAFT_KEY,draft); // removes old Planner drafts and transient Journal search state
+    writeJson(DRAFT_KEY,draft);
     try{
       const prefs=readJson('ap07_prefs',{});
       prefs.target=null;
@@ -83,9 +83,7 @@
       writeJson('ap07_prefs',prefs);
     }catch(_){}
   }
-  function restoreValues(){
-    for(const [id,value] of Object.entries(draft.values||{}))setValue(document.getElementById(id),value);
-  }
+  function restoreValues(){for(const [id,value] of Object.entries(draft.values||{}))setValue(document.getElementById(id),value);}
   function restoreDetails(){
     [...document.querySelectorAll('main details')].forEach((el,i)=>{
       if(transientUi(el))return;
@@ -140,8 +138,115 @@
     document.head.appendChild(s);
   }
 
+  /* v0.14 R&D — final Planner placement + intentionally minimal home screen. */
+  function ensureLayoutStyle(){
+    if(document.getElementById('astroV014LayoutStyle'))return;
+    const style=document.createElement('style');
+    style.id='astroV014LayoutStyle';
+    style.textContent=`
+      #home .homeHero{gap:0}
+      #home .homeLogoWrap{width:156px;height:156px;border-radius:40px;padding:9px}
+      #home .homeLogo{border-radius:32px}
+      #home .homeAppName{margin-top:22px;font-size:22px;font-weight:800;letter-spacing:.01em;color:#f3f7ff}
+      #home .homeVersion{margin-top:8px;font-size:10px;letter-spacing:.08em;color:#6f7d99}
+      .plannerRecommendationsCard{padding:14px 14px 15px}
+      .plannerRecommendationsCard .recommendationStandaloneHead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
+      .plannerRecommendationsCard .recommendationStandaloneHead h2{margin:0}
+      .plannerRecommendationsCard .plannerRecommendationEntry{margin:0;padding:0;border-top:0}
+      .plannerRecommendationsCard .plannerRecommendationEntry .secondary{width:100%;min-height:46px}
+      .plannerRecommendationsCard .plannerRecommendationsWrap{margin-top:12px}
+    `;
+    document.head.appendChild(style);
+  }
+
+  function simplifyHome(){
+    const hero=document.querySelector('#home .homeHero');
+    if(!hero||hero.dataset.minimalHome==='1')return;
+    hero.dataset.minimalHome='1';
+    hero.innerHTML=`
+      <div class="homeLogoWrap"><img class="homeLogo" src="./icon-192.png" alt="AstroPlanner"></div>
+      <div class="homeAppName">AstroPlanner</div>
+      <div class="homeVersion">v0.14 R&amp;D</div>`;
+  }
+
+  function placeRecommendationsBetweenNightAndAnalysis(){
+    const night=document.getElementById('plannerNightPanel');
+    const analysis=document.getElementById('plannerAnalysisPanel');
+    const button=document.getElementById('plannerRecommendationsBtn');
+    const wrap=document.getElementById('plannerRecommendationsWrap');
+    if(!night||!analysis||!button||!wrap)return;
+
+    let card=document.getElementById('plannerRecommendationsCard');
+    const existingCard=button.closest('.card');
+    if(!card&&existingCard&&existingCard!==night&&existingCard!==analysis){
+      card=existingCard;
+      card.id='plannerRecommendationsCard';
+      card.classList.add('plannerRecommendationsCard');
+    }
+    if(!card){
+      card=document.createElement('section');
+      card.id='plannerRecommendationsCard';
+      card.className='card plannerRecommendationsCard';
+      const head=document.createElement('div');
+      head.className='recommendationStandaloneHead';
+      head.innerHTML='<h2>Co fotografować?</h2><span class="small">ranking nocy</span>';
+      card.appendChild(head);
+    }
+
+    let entry=button.closest('.plannerRecommendationEntry');
+    if(!entry){
+      entry=document.createElement('div');
+      entry.className='plannerRecommendationEntry';
+      button.parentNode?.insertBefore(entry,button);
+      entry.appendChild(button);
+    }
+    if(!card.contains(entry))card.appendChild(entry);
+    if(!card.contains(wrap))card.appendChild(wrap);
+
+    /* Remove an obsolete empty recommendation container left in Warunki nocy. */
+    night.querySelectorAll('.plannerRecommendationEntry').forEach(el=>{if(el!==entry&&!el.children.length)el.remove();});
+    if(card.nextElementSibling!==analysis)analysis.parentNode.insertBefore(card,analysis);
+  }
+
+  /* Curated photographic identity can differ from the catalogue component carrying
+     the integrated magnitude. Example: M45 is ranked as reflection dust, while its
+     catalogue magnitude describes the stellar cluster. Never feed that stellar
+     photometry into the dust S/N model. */
+  function patchComponentPhotometry(){
+    const api=window.AstroTargetMetadata;
+    if(!api||api.__componentPhotometryPatched)return;
+    const stellarCodes=new Set(['OCl','GCl','*Ass','*','**']);
+    const fix=meta=>{
+      if(!meta||meta.physicalType!=='reflection-nebula'||!stellarCodes.has(String(meta.rawTypeCode||'')))return meta;
+      const s=meta.signal||{};
+      if(s.model==='component-photometry-mismatch')return meta;
+      return Object.freeze({...meta,signal:Object.freeze({
+        ...s,
+        model:'component-photometry-mismatch',
+        confidence:'low',
+        integratedMagnitude:null,
+        magnitudeBand:null,
+        surfaceBrightnessMagArcsec2:null,
+        surfaceBrightnessSource:null,
+        photometryAppliesTo:'stellar-component'
+      })});
+    };
+    const metadataForObject=api.metadataForObject?.bind(api);
+    const projectMetadata=api.projectMetadata?.bind(api);
+    const signalSummary=api.signalSummary?.bind(api);
+    if(metadataForObject)api.metadataForObject=(...args)=>fix(metadataForObject(...args));
+    if(projectMetadata)api.projectMetadata=(...args)=>fix(projectMetadata(...args));
+    if(signalSummary)api.signalSummary=meta=>meta?.signal?.model==='component-photometry-mismatch'
+      ?'fotometria katalogowa dotyczy składnika gwiazdowego, nie pyłu refleksyjnego'
+      :signalSummary(meta);
+    api.__componentPhotometryPatched=true;
+  }
+
+  function applyV014Layout(){ensureLayoutStyle();simplifyHome();placeRecommendationsBetweenNightAndAnalysis();patchComponentPhotometry();}
+
   document.addEventListener('DOMContentLoaded',()=>setTimeout(restoreAll,0));
   document.addEventListener('DOMContentLoaded',()=>setTimeout(loadBortleIndicator,0));
+  document.addEventListener('DOMContentLoaded',()=>setTimeout(applyV014Layout,0));
   document.addEventListener('input',e=>{if(persistable(e.target))scheduleSave();},true);
   document.addEventListener('change',e=>{if(persistable(e.target)||e.target?.matches?.('main details')&&!transientUi(e.target))scheduleSave();},true);
   document.addEventListener('toggle',e=>{if(e.target?.matches?.('main details')&&!transientUi(e.target))scheduleSave();},true);
