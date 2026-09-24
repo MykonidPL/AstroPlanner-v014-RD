@@ -7,7 +7,6 @@
   const DRAFT_KEY='ap0121_form_draft';
   const SCHEMA=1;
   const APP_PAGES=['planner','projects','journal','equipment'];
-  const PAGE_NAMES={planner:'Planer',projects:'Projekty',journal:'Dziennik',equipment:'Sprzęt'};
   const SAVE_DELAY=280;
 
   const readJson=(key,fallback)=>{try{return JSON.parse(localStorage.getItem(storageKey(key))||'')||fallback;}catch(_){return fallback;}};
@@ -55,7 +54,6 @@
     draft={schema:SCHEMA,values:collectValues(),savedAt:Date.now()};
     writeJson(UI_KEY,ui);
     writeJson(DRAFT_KEY,draft);
-    renderHome();
   }
   function scheduleSave(){if(restoring)return;clearTimeout(saveTimer);saveTimer=setTimeout(saveNow,SAVE_DELAY);}
 
@@ -91,18 +89,6 @@
       if(Object.prototype.hasOwnProperty.call(ui.details||{},key))el.open=!!ui.details[key];
     });
   }
-  function renderHome(){
-    try{
-      const projects=typeof getProjects==='function'?getProjects():[];
-      const sessions=typeof getSessions==='function'?getSessions():[];
-      const active=projects.filter(p=>(p.status||'active')==='active').length;
-      const planned=projects.filter(p=>p.status==='planned').length;
-      const a=document.getElementById('homeActiveCount'),p=document.getElementById('homePlannedCount'),s=document.getElementById('homeSessionCount');
-      if(a)a.textContent=String(active);if(p)p.textContent=String(planned);if(s)s.textContent=String(sessions.length);
-      const cont=document.getElementById('homeContinueBtn');
-      if(cont){const page=APP_PAGES.includes(ui.lastPage)?ui.lastPage:'planner';cont.textContent=`Kontynuuj: ${PAGE_NAMES[page]}`;cont.dataset.page=page;cont.style.display=page==='planner'?'none':'';}
-    }catch(_){ }
-  }
   function restoreAll(){
     restoring=true;
     try{
@@ -113,7 +99,6 @@
       try{if(typeof updateCameraKindUI==='function')updateCameraKindUI();}catch(_){}
       try{if(typeof updateProfileMetricsPreview==='function')updateProfileMetricsPreview();}catch(_){}
       restoreDetails();
-      renderHome();
       document.body.dataset.page='home';
     }finally{restoring=false;}
   }
@@ -122,12 +107,11 @@
   function onPageChange(id){
     document.body.dataset.page=id||'home';
     if(APP_PAGES.includes(id)){ui.lastPage=id;writeJson(UI_KEY,{...ui,schema:SCHEMA});}
-    if(id==='home')renderHome();
   }
   function openPlanner(){if(typeof switchPage==='function')switchPage('planner',true);}
   function continueWork(){const p=APP_PAGES.includes(ui.lastPage)?ui.lastPage:'planner';if(typeof switchPage==='function')switchPage(p,true);}
 
-  window.AstroUI={onPageChange,openPlanner,continueWork,saveNow,scheduleSave,renderHome,detailOpen};
+  window.AstroUI={onPageChange,openPlanner,continueWork,saveNow,scheduleSave,detailOpen};
 
   function loadBortleIndicator(){
     if(document.querySelector('script[data-astro-bortle]'))return;
@@ -144,11 +128,6 @@
     const style=document.createElement('style');
     style.id='astroV014LayoutStyle';
     style.textContent=`
-      #home .homeHero{gap:0}
-      #home .homeLogoWrap{width:156px;height:156px;border-radius:40px;padding:9px}
-      #home .homeLogo{border-radius:32px}
-      #home .homeAppName{margin-top:22px;font-size:22px;font-weight:800;letter-spacing:.01em;color:#f3f7ff}
-      #home .homeVersion{margin-top:8px;font-size:10px;letter-spacing:.08em;color:#6f7d99}
       #plannerRecommendationsCard.plannerPanel{padding:0;overflow:hidden}
       #plannerRecommendationsCard .plannerRecommendationEntry{margin:0;padding:0;border-top:0}
       #plannerRecommendationsCard .plannerRecommendationEntry .secondary{width:100%;min-height:46px}
@@ -168,16 +147,6 @@
       .currentScoreMetric.scoreGood .currentScoreRing{--ring:var(--good)}
     `;
     document.head.appendChild(style);
-  }
-
-  function simplifyHome(){
-    const hero=document.querySelector('#home .homeHero');
-    if(!hero||hero.dataset.minimalHome==='1')return;
-    hero.dataset.minimalHome='1';
-    hero.innerHTML=`
-      <div class="homeLogoWrap"><img class="homeLogo" src="./icon-192.png" alt="AstroPlanner"></div>
-      <div class="homeAppName">AstroPlanner</div>
-      <div class="homeVersion">v0.14 R&amp;D</div>`;
   }
 
   function placeRecommendationsBetweenNightAndAnalysis(){
@@ -406,7 +375,6 @@
 
   function applyV014Layout(){
     ensureLayoutStyle();
-    simplifyHome();
     placeRecommendationsBetweenNightAndAnalysis();
     syncRecommendationStatusVisibility();
     patchPlannerMapInfo();

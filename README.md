@@ -36,6 +36,14 @@ Nowa instalacja startuje z pustą biblioteką teleskopów, kamer, filtrów, kore
 
 ## Historia zmian
 
+### v0.14 R&D — czysty Start / usunięcie FOUC
+
+- minimalistyczny ekran Start jest teraz zapisany bezpośrednio w `index.html`, więc stary ekran nie może pojawić się na pierwszej klatce renderowania,
+- finalne style Startu są statyczne w `ui-shell.css`; usunięto późną podmianę HTML/CSS przez `ui-state.js`,
+- usunięto martwą logikę liczników i stare style ekranu Start,
+- `app.js` pozostaje nieużywanym plikiem historycznym i może zostać bezpiecznie usunięty z repo,
+- cache PWA R&D: `astroplanner-v014-rd-home-clean1`.
+
 ### v0.14 R&D — spójność Score Analiza ↔ ranking
 
 - Score bieżącego projektu używa teraz tych samych współrzędnych projektu co ranking (w tym zapisanego środka kadru, jeśli istnieje),
