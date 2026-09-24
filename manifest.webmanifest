@@ -1,0 +1,24 @@
+{
+  "name": "AstroPlanner v0.14 R&D",
+  "short_name": "AstroPlanner R&D",
+  "description": "AstroPlanner v0.14 R&D — środowisko testowe oparte na produkcyjnym v0.13.1, z rozwojem funkcji Co fotografować?.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#090d18",
+  "theme_color": "#0b1020",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

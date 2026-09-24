@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "manufacturer": "ZWO",
+  "models": [
+    {"model":"ASI2600MC Pro","kind":"astro","color":"color","sensor":"Sony IMX571","resX":6248,"resY":4176,"pixel":3.76,"sensorW":23.5,"sensorH":15.7,"cooled":true},
+    {"model":"ASI2600MM Pro","kind":"astro","color":"mono","sensor":"Sony IMX571","resX":6248,"resY":4176,"pixel":3.76,"sensorW":23.5,"sensorH":15.7,"cooled":true},
+    {"model":"ASI533MC Pro","kind":"astro","color":"color","sensor":"Sony IMX533","resX":3008,"resY":3008,"pixel":3.76,"sensorW":11.31,"sensorH":11.31,"cooled":true},
+    {"model":"ASI533MM Pro","kind":"astro","color":"mono","sensor":"Sony IMX533","resX":3008,"resY":3008,"pixel":3.76,"sensorW":11.31,"sensorH":11.31,"cooled":true},
+    {"model":"ASI6200MC Pro","kind":"astro","color":"color","sensor":"Sony IMX455","resX":9576,"resY":6388,"pixel":3.76,"sensorW":36.0,"sensorH":24.0,"cooled":true},
+    {"model":"ASI6200MM Pro","kind":"astro","color":"mono","sensor":"Sony IMX455","resX":9576,"resY":6388,"pixel":3.76,"sensorW":36.0,"sensorH":24.0,"cooled":true},
+    {"model":"ASI2400MC Pro","kind":"astro","color":"color","sensor":"Sony IMX410","resX":6072,"resY":4042,"pixel":5.94,"sensorW":36.0,"sensorH":24.0,"cooled":true},
+    {"model":"ASI294MC Pro","kind":"astro","color":"color","sensor":"Sony IMX294","resX":4144,"resY":2822,"pixel":4.63,"sensorW":19.1,"sensorH":13.0,"cooled":true},
+    {"model":"ASI294MM Pro","kind":"astro","color":"mono","sensor":"Sony IMX492","resX":8288,"resY":5644,"pixel":2.3,"sensorW":19.1,"sensorH":13.0,"cooled":true,"note":"Parametry dla trybu odblokowanego Bin1 zgodnie z aktualną specyfikacją ZWO."},
+    {"model":"ASI183MC Pro","kind":"astro","color":"color","sensor":"Sony IMX183","resX":5496,"resY":3672,"pixel":2.4,"sensorW":13.2,"sensorH":8.8,"cooled":true},
+    {"model":"ASI183MM Pro","kind":"astro","color":"mono","sensor":"Sony IMX183","resX":5496,"resY":3672,"pixel":2.4,"sensorW":13.2,"sensorH":8.8,"cooled":true},
+    {"model":"ASI585MC Pro","kind":"astro","color":"color","sensor":"Sony IMX585","resX":3840,"resY":2160,"pixel":2.9,"sensorW":11.136,"sensorH":6.264,"cooled":true},
+    {"model":"ASI585MM Pro","kind":"astro","color":"mono","sensor":"Sony IMX585","resX":3840,"resY":2160,"pixel":2.9,"sensorW":11.136,"sensorH":6.264,"cooled":true},
+    {"model":"ASI585MC","kind":"astro","color":"color","sensor":"Sony IMX585","resX":3840,"resY":2160,"pixel":2.9,"sensorW":11.2,"sensorH":6.3,"cooled":false},
+    {"model":"ASI585MM","kind":"astro","color":"mono","sensor":"Sony IMX585","resX":3840,"resY":2160,"pixel":2.9,"sensorW":11.2,"sensorH":6.3,"cooled":false},
+    {"model":"ASI678MC","kind":"astro","color":"color","sensor":"Sony IMX678","resX":3840,"resY":2160,"pixel":2.0,"sensorW":7.7,"sensorH":4.3,"cooled":false},
+    {"model":"ASI678MM","kind":"astro","color":"mono","sensor":"Sony IMX678","resX":3840,"resY":2160,"pixel":2.0,"sensorW":7.7,"sensorH":4.3,"cooled":false},
+    {"model":"ASI676MC","kind":"astro","color":"color","sensor":"Sony IMX676","resX":3552,"resY":3552,"pixel":2.0,"sensorW":7.1,"sensorH":7.1,"cooled":false},
+    {"model":"ASI676MM","kind":"astro","color":"mono","sensor":"Sony IMX676","resX":3552,"resY":3552,"pixel":2.0,"sensorW":7.1,"sensorH":7.1,"cooled":false},
+    {"model":"ASI715MC","kind":"astro","color":"color","sensor":"Sony IMX715","resX":3864,"resY":2192,"pixel":1.45,"sensorW":5.6,"sensorH":3.2,"cooled":false}
+  ]
+}
