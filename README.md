@@ -36,6 +36,14 @@ Nowa instalacja startuje z pustą biblioteką teleskopów, kamer, filtrów, kore
 
 ## Historia zmian
 
+### v0.14 R&D — poprawka ciągłości DSS2 podczas panowania
+
+- podczas przeciągania mapy Aladin Lite nie dostaje już `gotoRaDec()` na każdej klatce gestu,
+- ostatni zweryfikowany kadr DSS2 jest utrzymywany jako warstwa hold i przesuwany razem z gestem,
+- nowe RA/Dec są commitowane do Aladina dopiero po zakończeniu drag; stary raster pozostaje nad WebGL do chwili potwierdzenia nowych kafli,
+- w razie faktycznej awarii/pustego DSS2 hold jest usuwany i nadal uruchamia się techniczny fallback,
+- cache PWA R&D: `astroplanner-v014-rd-raster-pan2`.
+
 ### v0.13.1
 
 Hotfix interfejsu zarządzania danymi w Dzienniku i Archiwum.
