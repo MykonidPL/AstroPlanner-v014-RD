@@ -39,7 +39,17 @@ footer{max-width:980px;margin:auto;padding:0 16px 30px;color:#72809e;font-size:1
 
 /* v0.14 R&D — rekomendacje wewnątrz Planera */
 .plannerRecommendationEntry{margin-top:12px;padding-top:12px;border-top:1px solid #253554}.plannerRecommendationEntry .secondary{width:100%}.plannerRecommendationEntry .small{margin-top:7px;line-height:1.5}.plannerRecommendationsWrap{margin-top:12px;padding:12px;border:1px solid #2a3a5b;border-radius:12px;background:#0a1322}.plannerRecommendationsWrap[hidden]{display:none}.recommendationSectionHead{display:flex;justify-content:space-between;gap:10px;align-items:baseline;margin-bottom:8px}.recommendationSectionHead h3{margin:0;color:#eef3ff;font-size:15px}.recommendationCount{font-size:11px;color:var(--muted)}.recommendationStatus{font-size:11px;color:var(--muted);line-height:1.5;margin:0 0 10px}.recommendationContext{font-size:11px;color:#aebbd4;line-height:1.5;margin:0 0 10px;padding:8px 9px;border:1px solid #273856;border-radius:9px;background:#0b1425}.recommendationList{display:grid;gap:8px}.recommendationItem{border:1px solid #2a3a5b;border-radius:12px;background:#0b1425;overflow:hidden}.recommendationItem>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:52px minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px 12px}.recommendationItem>summary::-webkit-details-marker{display:none}.recommendationScore{width:46px;height:46px;border-radius:12px;display:grid;place-items:center;background:#15233c;border:1px solid #34537f;color:#e8f1ff;font-size:18px;font-weight:850;font-variant-numeric:tabular-nums}.recommendationMain{min-width:0}.recommendationMain b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.recommendationMain span{display:block;font-size:10px;color:var(--muted);margin-top:3px}.recommendationChevron{font-size:14px;color:#8fa6cc;transition:transform .12s ease}.recommendationItem[open] .recommendationChevron{transform:rotate(90deg)}.recommendationBody{border-top:1px solid #243553;padding:10px 12px 12px}.recommendationReason{font-size:12px;line-height:1.55;color:#d7e1f5}.recommendationReason b{color:#f0f5ff}.recommendationBody .secondary{width:100%;margin-top:9px}.recommendationEmpty{padding:20px 12px;text-align:center;border:1px dashed #334564;border-radius:12px;color:var(--muted);font-size:12px;line-height:1.5}@media(max-width:520px){.recommendationItem>summary{grid-template-columns:46px minmax(0,1fr) auto}.recommendationScore{width:42px;height:42px;font-size:17px}}
-</style><link rel="stylesheet" href="./ui-shell.css"><script src="./ui-state.js" defer></script><script src="./snapshot-store.js" defer></script></head><body data-page="home">
+</style><link rel="stylesheet" href="./ui-shell.css"><style>
+/* v0.14 R&D — Start pozostaje ekranem powitalnym, ale dolna nawigacja jest zawsze dostępna. */
+body[data-page="home"]{padding-bottom:calc(var(--ui-nav-h) + env(safe-area-inset-bottom,0px))}
+body[data-page="home"] .bottomNav{opacity:1;pointer-events:auto;transform:translateY(0)}
+body[data-page="home"] .homeHero{min-height:calc(100dvh - var(--ui-nav-h));padding-bottom:calc(30px + env(safe-area-inset-bottom,0px))}
+@media(min-width:760px){
+  body[data-page="home"] .bottomNav{transform:translateX(-50%)}
+  body[data-page="home"]{padding-bottom:96px}
+  body[data-page="home"] .homeHero{min-height:calc(100dvh - 96px)}
+}
+</style><script src="./ui-state.js" defer></script><script src="./snapshot-store.js" defer></script></head><body data-page="home">
 <main>
 <section id="home" class="page homePage active" aria-label="Ekran startowy AstroPlanner">
   <div class="homeStars" aria-hidden="true"></div>
