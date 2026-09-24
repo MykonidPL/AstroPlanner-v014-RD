@@ -36,13 +36,14 @@ Nowa instalacja startuje z pustą biblioteką teleskopów, kamer, filtrów, kore
 
 ## Historia zmian
 
-### v0.14 R&D — poprawka ciągłości DSS2 podczas panowania
+### v0.14 R&D — przywrócenie ciągłej warstwy DSS2 HiPS
 
-- podczas przeciągania mapy Aladin Lite nie dostaje już `gotoRaDec()` na każdej klatce gestu,
-- ostatni zweryfikowany kadr DSS2 jest utrzymywany jako warstwa hold i przesuwany razem z gestem,
-- nowe RA/Dec są commitowane do Aladina dopiero po zakończeniu drag; stary raster pozostaje nad WebGL do chwili potwierdzenia nowych kafli,
-- w razie faktycznej awarii/pustego DSS2 hold jest usuwany i nadal uruchamia się techniczny fallback,
-- cache PWA R&D: `astroplanner-v014-rd-raster-pan2`.
+- usunięto regresję wprowadzoną przez walidowanie i wygaszanie rastra po każdej zmianie viewportu; pan i zoom ponownie korzystają z ciągłej, żywej warstwy Aladin HiPS,
+- `gotoRaDec()` i `setFov()` działają na bieżąco jak w stabilnej implementacji sprzed regresji; Aladin może utrzymywać już pobrane kafle i niższe poziomy piramidy podczas doładowywania szczegółów,
+- kontrola pustego/białego canvasa nadal chroni pierwsze uruchomienie: techniczny fallback nie jest przykrywany, dopóki DSS2 nie pokaże rzeczywistych danych,
+- po pierwszym poprawnym potwierdzeniu DSS2 przejściowe stany ładowania podczas pan/zoom nie wygaszają rastra; fallback uruchamia się dopiero po trwałym błędzie/timeoutcie,
+- usunięto tymczasową warstwę `hold`, ponieważ maskowała objaw wyłącznie podczas drag i nie rozwiązywała regresji zoomu,
+- cache PWA R&D: `astroplanner-v014-rd-raster-continuous1`.
 
 ### v0.13.1
 

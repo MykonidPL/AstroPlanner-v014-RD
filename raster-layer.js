@@ -1,9 +1,10 @@
 (function(global){
   'use strict';
 
-  // AstroPlanner v0.14 R&D — passive DSS2 Color raster under the AstroPlanner SVG.
-  // Important invariant: the Aladin canvas is NEVER revealed until real survey
-  // content is detected. A blank/white WebGL canvas must not cover the technical map.
+  // AstroPlanner v0.14 R&D — continuous DSS2 Color HiPS raster under the AstroPlanner SVG.
+  // Initial reveal is guarded against a blank/white WebGL canvas. After the first
+  // verified DSS2 frame, pan/zoom keeps the live Aladin HiPS canvas visible while
+  // its tile pyramid refines in place; temporary tile fetches must not blank the map.
 
   const ALADIN_URL='https://aladin.cds.unistra.fr/AladinLite/api/v3/latest/aladin.js';
   const DSS2_SURVEY='P/DSS2/color';
@@ -12,11 +13,10 @@
   const MAX_RETRIES=3;
   const MAX_TILE_PROBES=12;
 
-  let shell=null,stage=null,host=null,hold=null;
+  let shell=null,stage=null,host=null;
   let aladin=null,initPromise=null,stageObserver=null,resizeObserver=null;
   let syncFrame=0,resizeKick=0,probeTimer=0,retryTimer=0,retryCount=0,tileProbeCount=0;
-  let last={ra:NaN,dec:NaN,fov:NaN},failed=false,tileState='idle',lastError='';
-  let panActive=false,panOffset={x:0,y:0},holdFrame=null,holdCaptureSeq=0;
+  let last={ra:NaN,dec:NaN,fov:NaN},failed=false,tileState='idle',lastError='',rasterTrusted=false;
 
   function injectStyle(){
     if(document.getElementById('astroRasterStyle'))return;
@@ -24,15 +24,14 @@
     st.id='astroRasterStyle';
     st.textContent=`
       .astroRasterShell{position:relative;width:100%;border-radius:14px;overflow:hidden;background:#07101c}
-      .astroRasterShell > #plannerMapStage{position:relative!important;z-index:3!important;background:transparent!important;background-image:none!important}
-      .astroRasterShell > #plannerMapStage > svg{position:relative!important;z-index:3!important;background:transparent!important}
+      .astroRasterShell > #plannerMapStage{position:relative!important;z-index:2!important;background:transparent!important;background-image:none!important}
+      .astroRasterShell > #plannerMapStage > svg{position:relative!important;z-index:2!important;background:transparent!important}
       .astroRasterShell.astroRasterReady #plannerMapStage .frStars{display:none!important}
       .astroRasterShell.astroRasterReady #plannerMapStage .frDso > :not(text){display:none!important}
       .astroRasterShell.astroRasterReady ~ .framingLegend .stars,
       .astroRasterShell.astroRasterReady ~ .framingLegend .dso,
       .astroRasterShell.astroRasterReady ~ .plannerMapDsoNote{display:none!important}
-      .astroRasterHost{position:absolute!important;left:0!important;top:0!important;z-index:1!important;overflow:hidden!important;pointer-events:none!important;background:#07101c!important;opacity:0;transition:opacity .12s linear;will-change:transform}
-      .astroRasterHold{position:absolute!important;inset:0!important;z-index:2!important;width:100%!important;height:100%!important;display:block!important;object-fit:fill!important;pointer-events:none!important;opacity:0;transform:translate3d(0,0,0);transform-origin:0 0;will-change:transform;transition:none!important}
+      .astroRasterHost{position:absolute!important;left:0!important;top:0!important;z-index:1!important;overflow:hidden!important;pointer-events:none!important;background:#07101c!important;opacity:0;transition:opacity .12s linear}
       .astroRasterHost *{pointer-events:none!important}
       .astroRasterHost canvas{position:absolute!important;inset:0!important;display:block!important;width:100%!important;height:100%!important;max-width:none!important;margin:0!important;padding:0!important;border:0!important;border-radius:0!important;background:transparent!important;box-shadow:none!important}
       .astroRasterHost svg,.astroRasterHost text,.astroRasterHost .aladin-svgCanvas,.astroRasterHost .aladin-gridCanvas,.astroRasterHost .aladin-coordinateGrid,.astroRasterHost .aladin-coordinate-grid,.astroRasterHost .aladin-grid-labels,.astroRasterHost .aladin-catalogCanvas{display:none!important;opacity:0!important;visibility:hidden!important}
@@ -45,42 +44,6 @@
     if(visible){shell?.classList?.add('astroRasterReady');if(host)host.style.opacity='1';}
     else{shell?.classList?.remove('astroRasterReady');if(host)host.style.opacity='0';}
   }
-
-  function holdVisible(){return !!hold&&hold.style.opacity==='1';}
-  function resetPanTransform(){if(host)host.style.transform='translate3d(0,0,0)';if(hold)hold.style.transform='translate3d(0,0,0)';panOffset={x:0,y:0};}
-  function hideHold(clearFrame=false){if(hold){hold.style.opacity='0';hold.style.transform='translate3d(0,0,0)';}if(clearFrame)holdFrame=null;}
-  function sameView(a,b){if(!a||!b)return false;const dra=Math.abs((((Number(a.ra)-Number(b.ra))+540)%360)-180);return dra<1e-5&&Math.abs(Number(a.dec)-Number(b.dec))<1e-5&&Math.abs(Number(a.fov)-Number(b.fov))<1e-4;}
-  async function cacheVerifiedFrame(){
-    const seq=++holdCaptureSeq;if(!aladin||failed||tileState!=='tile✓'||typeof aladin.getViewDataURL!=='function')return;
-    const view={...last};if(!Number.isFinite(view.ra)||!Number.isFinite(view.dec)||!Number.isFinite(view.fov))return;
-    try{
-      disableAladinGrid();suppressAladinOverlays();
-      const raw=aladin.getViewDataURL('image/jpeg'),dataUrl=raw&&typeof raw.then==='function'?await raw:raw;
-      if(seq!==holdCaptureSeq||failed||tileState!=='tile✓'||!sameView(view,last))return;
-      if(typeof dataUrl==='string'&&dataUrl.startsWith('data:image/'))holdFrame={dataUrl,view};
-    }catch(err){console.warn('AstroPlanner raster hold:',err);}
-  }
-
-  function beginPan(){
-    if(failed||tileState!=='tile✓'||!aladin)return false;
-    panActive=true;panOffset={x:0,y:0};clearTimeout(probeTimer);probeTimer=0;
-    if(holdFrame&&sameView(holdFrame.view,last)&&hold){hold.src=holdFrame.dataUrl;hold.style.opacity='1';hold.style.transform='translate3d(0,0,0)';}
-    else{hideHold(false);if(host)host.style.transform='translate3d(0,0,0)';cacheVerifiedFrame();}
-    setRasterVisible(true);return true;
-  }
-  function previewPan(dx,dy){
-    if(!panActive)return;const x=Number(dx)||0,y=Number(dy)||0;panOffset={x,y};
-    if(holdFrame&&sameView(holdFrame.view,last)&&hold){if(hold.getAttribute('src')!==holdFrame.dataUrl)hold.src=holdFrame.dataUrl;hold.style.opacity='1';hold.style.transform=`translate3d(${x.toFixed(2)}px,${y.toFixed(2)}px,0)`;if(host)host.style.transform='translate3d(0,0,0)';}
-    else if(host)host.style.transform=`translate3d(${x.toFixed(2)}px,${y.toFixed(2)}px,0)`;
-    shell?.classList?.add('astroRasterReady');
-  }
-  function endPan(){
-    if(!panActive){scheduleSync();return;}panActive=false;
-    if(holdFrame&&sameView(holdFrame.view,last)&&hold){hold.src=holdFrame.dataUrl;hold.style.opacity='1';hold.style.transform=`translate3d(${panOffset.x.toFixed(2)}px,${panOffset.y.toFixed(2)}px,0)`;if(host){host.style.transform='translate3d(0,0,0)';host.style.opacity='0';}shell?.classList?.add('astroRasterReady');}
-    else if(host)host.style.transform='translate3d(0,0,0)';
-    scheduleSync();
-  }
-  function cancelPan(){panActive=false;resetPanTransform();hideHold(false);scheduleSync();}
 
   function suppressAladinOverlays(){
     if(!host)return;
@@ -108,8 +71,6 @@
     else{shell=document.createElement('div');shell.className='astroRasterShell';stage.parentNode.insertBefore(shell,stage);shell.appendChild(stage);}
     host=shell.querySelector(':scope > .astroRasterHost');
     if(!host){host=document.createElement('div');host.className='astroRasterHost';host.id='astroRasterHost';shell.insertBefore(host,stage);}
-    hold=shell.querySelector(':scope > .astroRasterHold');
-    if(!hold){hold=document.createElement('img');hold.className='astroRasterHold';hold.alt='';hold.setAttribute('aria-hidden','true');shell.insertBefore(hold,stage);}
     sizeHost();
     if(!stageObserver){stageObserver=new MutationObserver(scheduleSync);stageObserver.observe(stage,{childList:true,subtree:true});}
     if(!resizeObserver&&'ResizeObserver'in global){
@@ -126,7 +87,7 @@
     try{aladin?.destroy?.();}catch(_){}try{aladin?.dispose?.();}catch(_){}
     aladin=null;initPromise=null;
     if(!global.A?.aladin)document.querySelector(`script[src="${ALADIN_URL}"]`)?.remove();
-    failed=false;last={ra:NaN,dec:NaN,fov:NaN};tileState='idle';panActive=false;holdCaptureSeq++;resetPanTransform();hideHold(true);setRasterVisible(false);
+    failed=false;last={ra:NaN,dec:NaN,fov:NaN};tileState='idle';rasterTrusted=false;setRasterVisible(false);
     if(host)host.replaceChildren();
   }
 
@@ -176,7 +137,7 @@
         try{global.dispatchEvent(new Event('resize'));}catch(_){}
         const actual=aladin.getSize?.();if(!actual||Number(actual[0])<40||Number(actual[1])<40)throw new Error('Aladin ma nieprawidłowy viewport');
         if(typeof aladin.on==='function'){aladin.on('positionChanged',enforceGridOffAfterRedraw);aladin.on('zoomChanged',enforceGridOffAfterRedraw);aladin.on('resizeChanged',enforceGridOffAfterRedraw);}
-        failed=false;lastError='';tileProbeCount=0;tileState='loading';enforceGridOffAfterRedraw();scheduleProbe(650);return aladin;
+        failed=false;lastError='';tileProbeCount=0;tileState='loading';last={...initial};enforceGridOffAfterRedraw();scheduleProbe(650);return aladin;
       }catch(err){
         if(String(err?.message||'').includes('nie jest jeszcze widoczna')){initPromise=null;throw err;}
         failed=true;lastError=String(err?.message||err||'błąd rastra');setRasterVisible(false);console.warn('AstroPlanner raster:',err);scheduleRetry();throw err;
@@ -195,7 +156,13 @@
     const sz=aladin.getSize?.()||[],w=Number(sz[0])||0,h=Number(sz[1])||0;if(w<40||h<40){scheduleProbe(450);return;}
     const xs=[.14,.30,.50,.70,.86],ys=[.16,.37,.59,.82],pixels=[];
     for(const y of ys)for(const x of xs){const rgb=pixelRgb(w*x,h*y);if(rgb)pixels.push(rgb);}
-    if(pixels.length<5){tileState='waiting';if(!holdVisible())setRasterVisible(false);if(++tileProbeCount<=MAX_TILE_PROBES)scheduleProbe(550);else failTileProbe('brak danych pikseli DSS2');return;}
+    if(pixels.length<5){
+      tileState=rasterTrusted?'refreshing':'waiting';
+      if(!rasterTrusted)setRasterVisible(false);else setRasterVisible(true);
+      if(++tileProbeCount<=MAX_TILE_PROBES)scheduleProbe(550);
+      else failTileProbe('brak danych pikseli DSS2');
+      return;
+    }
 
     const ls=pixels.map(luminance),lMin=Math.min(...ls),lMax=Math.max(...ls),lMean=ls.reduce((a,b)=>a+b,0)/ls.length;
     const channelRange=[0,1,2].reduce((sum,c)=>sum+Math.max(...pixels.map(p=>p[c]))-Math.min(...pixels.map(p=>p[c])),0);
@@ -205,32 +172,41 @@
     const hasStructure=(lMax-lMin)>4||channelRange>16||bgDistance>55;
 
     if(!nearWhite&&!nearBackground&&hasStructure){
-      tileState='tile✓';tileProbeCount=0;failed=false;lastError='';retryCount=0;resetPanTransform();setRasterVisible(true);hideHold(false);suppressAladinOverlays();cacheVerifiedFrame();return;
+      rasterTrusted=true;tileState='tile✓';tileProbeCount=0;failed=false;lastError='';retryCount=0;setRasterVisible(true);suppressAladinOverlays();return;
     }
-    tileState=nearWhite?'blank-white':'waiting';if(!holdVisible())setRasterVisible(false);
-    if(++tileProbeCount<=MAX_TILE_PROBES)scheduleProbe(550);else failTileProbe(nearWhite?'biały/pusty canvas DSS2':'DSS2 nie narysował potwierdzonej zawartości');
+
+    // Before the first valid DSS2 frame, keep the technical fallback visible. Once
+    // the survey has been verified, a temporary blank/background sample normally
+    // means Aladin is refining another HiPS order or fetching neighbouring tiles.
+    // Keep the live raster visible exactly as the pre-regression implementation did.
+    tileState=rasterTrusted?'refreshing':(nearWhite?'blank-white':'waiting');
+    if(!rasterTrusted)setRasterVisible(false);else setRasterVisible(true);
+    if(++tileProbeCount<=MAX_TILE_PROBES)scheduleProbe(550);
+    else failTileProbe(nearWhite?'biały/pusty canvas DSS2':'DSS2 nie narysował potwierdzonej zawartości');
   }
 
   function failTileProbe(message){
-    failed=true;lastError=message;tileState='fallback';panActive=false;resetPanTransform();hideHold(false);setRasterVisible(false);console.warn('AstroPlanner raster:',message);scheduleRetry(900);
+    failed=true;lastError=message;tileState='fallback';setRasterVisible(false);console.warn('AstroPlanner raster:',message);scheduleRetry(900);
   }
   function scheduleProbe(delay=500){clearTimeout(probeTimer);probeTimer=setTimeout(probeTiles,delay);}
 
   async function sync(){
     syncFrame=0;if(!ensureShell())return;const view=plannerView();if(!view)return;if(failed){if(plannerActive())scheduleRetry(450);return;}
     try{await initAladin();}catch(_){return;}if(!aladin||failed)return;sizeHost();
-    if(panActive){setRasterVisible(true);return;}
     const moved=!Number.isFinite(last.ra)||Math.abs(view.ra-last.ra)>1e-5||Math.abs(view.dec-last.dec)>1e-5;
     const zoomed=!Number.isFinite(last.fov)||Math.abs(view.fov-last.fov)>1e-4;
     try{
       if(moved||zoomed){
-        tileState='loading';tileProbeCount=0;
-        if(holdVisible()){shell?.classList?.add('astroRasterReady');if(host)host.style.opacity='0';}
-        else setRasterVisible(false);
+        tileState=rasterTrusted?'refreshing':'loading';tileProbeCount=0;
+        if(rasterTrusted)setRasterVisible(true);else setRasterVisible(false);
       }
-      if(moved)aladin.gotoRaDec(view.ra,view.dec);if(zoomed)aladin.setFov(view.fov);enforceGridOffAfterRedraw();last=view;suppressAladinOverlays();
-      if(moved||zoomed)scheduleProbe(650);else if(tileState==='tile✓')setRasterVisible(true);else if(!probeTimer)scheduleProbe(450);
-    }catch(err){failed=true;lastError=String(err?.message||err||'błąd synchronizacji rastra');panActive=false;resetPanTransform();hideHold(false);setRasterVisible(false);console.warn('AstroPlanner raster sync:',err);scheduleRetry(900);}
+      if(moved)aladin.gotoRaDec(view.ra,view.dec);
+      if(zoomed)aladin.setFov(view.fov);
+      enforceGridOffAfterRedraw();last=view;suppressAladinOverlays();
+      if(moved||zoomed)scheduleProbe(650);
+      else if(rasterTrusted)setRasterVisible(true);
+      else if(!probeTimer)scheduleProbe(450);
+    }catch(err){failed=true;lastError=String(err?.message||err||'błąd synchronizacji rastra');rasterTrusted=false;setRasterVisible(false);console.warn('AstroPlanner raster sync:',err);scheduleRetry(900);}
   }
 
   async function captureView(format='image/jpeg'){
@@ -252,7 +228,7 @@
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 
   global.AstroRasterLayer={
-    sync:scheduleSync,captureView,beginPan,previewPan,endPan,cancelPan,
-    getStatus:()=>({ready:tileState==='tile✓'&&!failed,recovering:!!retryTimer,retryCount,maxRetries:MAX_RETRIES,lastError,source:DSS2_SURVEY,activeSurvey:'dss2-color',fullSky:true,aladinSize:aladin?.getSize?.()||null,tileState,panActive,holdReady:!!holdFrame,diagnostics:diagnostics(),lastView:{...last}})
+    sync:scheduleSync,captureView,
+    getStatus:()=>({ready:rasterTrusted&&!failed,recovering:!!retryTimer,retryCount,maxRetries:MAX_RETRIES,lastError,source:DSS2_SURVEY,activeSurvey:'dss2-color',fullSky:true,aladinSize:aladin?.getSize?.()||null,tileState,diagnostics:diagnostics(),lastView:{...last}})
   };
 })(window);
