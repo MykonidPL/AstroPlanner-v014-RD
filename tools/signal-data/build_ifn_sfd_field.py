@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AstroPlanner R&D — Stage 4B.7p IFN SFD -> HEALPix v1 smoke builder + canary binary writer.
+"""AstroPlanner R&D — Stage 4B.7q IFN SFD -> HEALPix v1 smoke builder + bounded 4096-record canary writer.
 
 Purpose of this microstage:
 - validate the frozen output grid contract: HEALPix NSIDE=256, RING, ICRS;
@@ -7,7 +7,7 @@ Purpose of this microstage:
 - prove the path on a small control/sample set only.
 
 This tool intentionally DOES NOT generate the all-sky runtime asset yet.
-The binary writer is canary-only and is limited by the explicit <=64-pixel smoke list.
+The binary writer is canary-only: explicit smoke lists remain <=64 pixels, and the only larger mode is a fixed 4096-pixel evenly distributed all-sky canary.
 It never changes AstroPlanner runtime, Score, UI, or recommendations.
 
 Input contract:
@@ -38,7 +38,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-BUILDER_VERSION = "4B.7p-canary-writer-1"
+BUILDER_VERSION = "4B.7q-large-canary-1"
 MODEL = "ifn-sfd-i100"
 NSIDE = 256
 NPIX = 12 * NSIDE * NSIDE
@@ -545,8 +545,19 @@ def parse_pixel_list(spec: str) -> list[int]:
     if not out:
         raise argparse.ArgumentTypeError("pixel list is empty")
     if len(out) > 64:
-        raise argparse.ArgumentTypeError("Stage 4B.7p smoke builder allows at most 64 pixels")
+        raise argparse.ArgumentTypeError("Stage 4B.7q explicit smoke list allows at most 64 pixels")
     return out
+
+
+def make_even_canary_pixels_4096() -> list[int]:
+    """Return exactly 4096 deterministic, unique RING pixels spanning the full grid."""
+    count = 4096
+    pixels = [int(round(i * (NPIX - 1) / (count - 1))) for i in range(count)]
+    if len(pixels) != count or len(set(pixels)) != count:
+        raise RuntimeError("4096-pixel canary generation did not produce unique pixels")
+    if pixels[0] != 0 or pixels[-1] != NPIX - 1:
+        raise RuntimeError("4096-pixel canary does not span the full HEALPix index range")
+    return pixels
 
 
 def build_pixel_record(maps: dict[int, SfdMap], pix: int) -> dict[str, Any]:
@@ -568,12 +579,17 @@ def write_canary_asset(
     pixel_records: list[dict[str, Any]],
     prefix: Path,
     maps: dict[int, SfdMap],
+    canary_mode: str,
 ) -> tuple[Path, Path, dict[str, Any]]:
-    """Write a <=64-record binary/manifest canary; never a full-sky runtime asset."""
+    """Write a bounded <=4096-record canary; never a full-sky runtime asset."""
     if not pixel_records:
-        raise RuntimeError("canary binary writer requires explicit --pixels records")
-    if len(pixel_records) > 64:
-        raise RuntimeError("canary binary writer is limited to 64 records")
+        raise RuntimeError("canary binary writer requires canary pixel records")
+    if len(pixel_records) > 4096:
+        raise RuntimeError("canary binary writer is hard-limited to 4096 records")
+    if canary_mode == "even-sky-4096" and len(pixel_records) != 4096:
+        raise RuntimeError("even-sky-4096 mode requires exactly 4096 records")
+    if canary_mode == "explicit-smoke" and len(pixel_records) > 64:
+        raise RuntimeError("explicit-smoke canary remains limited to 64 records")
 
     rows = np.empty((len(pixel_records), 2), dtype=np.float64)
     pixel_indices: list[int] = []
@@ -617,14 +633,16 @@ def write_canary_asset(
 
     manifest = {
         "schemaVersion": 1,
-        "stage": "4B.7p",
-        "kind": "canary-binary-format-not-runtime-asset",
+        "stage": "4B.7q",
+        "kind": "bounded-canary-binary-not-runtime-asset",
         "generatedAt": utc_now(),
         "builderVersion": BUILDER_VERSION,
         "model": MODEL,
         "source": "SFD-100um-I100",
         "unit": EXPECTED_BUNIT,
         "fullSky": False,
+        "canaryMode": canary_mode,
+        "hardRecordLimit": 4096,
         "grid": {
             "type": "HEALPix",
             "nside": NSIDE,
@@ -667,23 +685,30 @@ def write_canary_asset(
     return binary_path, manifest_path, manifest
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Stage 4B.7p SFD I100 -> HEALPix smoke builder + canary writer")
+    parser = argparse.ArgumentParser(description="Stage 4B.7q SFD I100 -> HEALPix smoke builder + bounded 4096-record canary writer")
     parser.add_argument("--ngp", type=Path, help="path to SFD_i100_4096_ngp.fits")
     parser.add_argument("--sgp", type=Path, help="path to SFD_i100_4096_sgp.fits")
     parser.add_argument("--control", action="append", default=[], metavar="NAME,L,B", help="measure a control field and the containing NSIDE=256 RING pixel")
     parser.add_argument("--pixels", type=parse_pixel_list, help="comma-separated explicit HEALPix RING pixels; max 64")
+    parser.add_argument("--canary-grid-4096", action="store_true", help="use exactly 4096 deterministic HEALPix RING pixels spanning the full sky; requires both SFD maps and --canary-asset-prefix")
     parser.add_argument("--output", type=Path, default=Path("ifn-sfd-field-smoke-v1.json"))
     parser.add_argument(
         "--canary-asset-prefix",
         type=Path,
-        help="write <=64 explicit --pixels as PREFIX.bin + PREFIX.json; never full-sky",
+        help="write canary records as PREFIX.bin + PREFIX.json; explicit --pixels <=64 or fixed --canary-grid-4096; never full-sky",
     )
     args = parser.parse_args()
 
     if args.ngp is None and args.sgp is None:
         parser.error("at least one of --ngp/--sgp is required")
-    if not args.control and not args.pixels:
-        parser.error("Stage 4B.7p requires --control and/or --pixels; full-sky generation is intentionally not enabled")
+    if args.canary_grid_4096 and args.pixels:
+        parser.error("--canary-grid-4096 and --pixels are mutually exclusive")
+    if args.canary_grid_4096 and args.canary_asset_prefix is None:
+        parser.error("--canary-grid-4096 requires --canary-asset-prefix")
+    if args.canary_grid_4096 and (args.ngp is None or args.sgp is None):
+        parser.error("--canary-grid-4096 requires both --ngp and --sgp")
+    if not args.control and not args.pixels and not args.canary_grid_4096:
+        parser.error("Stage 4B.7q requires --control, --pixels, or --canary-grid-4096; full-sky generation is intentionally not enabled")
 
     maps: dict[int, SfdMap] = {}
     if args.ngp is not None:
@@ -694,16 +719,21 @@ def main() -> int:
     hp_test = self_test_healpix()
     controls = [parse_control(x) for x in args.control]
     control_records = [build_control_record(maps, name, l, b) for name, l, b in controls]
-    pixels = args.pixels or []
+    if args.canary_grid_4096:
+        pixels = make_even_canary_pixels_4096()
+        canary_mode = "even-sky-4096"
+    else:
+        pixels = args.pixels or []
+        canary_mode = "explicit-smoke"
     pixel_records = [build_pixel_record(maps, p) for p in pixels]
 
     if args.canary_asset_prefix is not None and not pixels:
-        parser.error("--canary-asset-prefix requires explicit --pixels")
+        parser.error("--canary-asset-prefix requires --pixels or --canary-grid-4096")
 
     canary_result = None
     if args.canary_asset_prefix is not None:
         binary_path, manifest_path, manifest = write_canary_asset(
-            pixel_records, args.canary_asset_prefix, maps
+            pixel_records, args.canary_asset_prefix, maps, canary_mode
         )
         canary_result = {
             "binary": str(binary_path),
@@ -715,7 +745,7 @@ def main() -> int:
 
     payload = {
         "schemaVersion": 1,
-        "stage": "4B.7p",
+        "stage": "4B.7q",
         "kind": "smoke-validation-not-runtime-asset",
         "generatedAt": utc_now(),
         "builderVersion": BUILDER_VERSION,
@@ -747,7 +777,7 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
-        "stage": "4B.7p",
+        "stage": "4B.7q",
         "controls": len(control_records),
         "pixels": len(pixel_records),
         "healpixRoundTripFailures": hp_test["roundTripFailures"],
