@@ -178,9 +178,18 @@ def catalog_identity_key(value: str) -> str | None:
 
 
 def unsafe_pn_name_alias(value: str) -> bool:
-    """Reject PN shorthand that can collide with Messier identity tokens."""
+    """Reject PN aliases that are unsafe for cross-class identity matching.
+
+    HASH can carry historical Sharpless/LBN/RCW/LDN/CTB cross-identifiers for
+    planetary nebulae. Those identifiers also name diffuse-nebula catalogue
+    entries, so exposing them as generic PN aliases can create PN<->HII/SNR
+    collisions during runtime matching. Keep PN-native PNG/PN G and safe
+    NGC/IC/SIMBAD identities instead.
+    """
     s = normalize_alias(value)
-    return bool(re.fullmatch(r"(?:PN\s+)?M\s*\d+\s*-\s*\d+", s))
+    if re.fullmatch(r"(?:PN\s+)?M\s*\d+\s*-\s*\d+", s):
+        return True
+    return bool(re.fullmatch(r"(?:SH\s*2[-\s]*\d+|RCW\s*\d+|LBN\s*\d+|LDN\s*\d+|CTB\s*\d+)", s))
 
 
 def aliases_from_record(r: dict[str, Any]) -> list[str]:
@@ -415,7 +424,10 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int], dict[str, An
             if not strong:
                 continue
             for idx in strong_index.get(strong, []):
-                if out[idx].physical_type == item.physical_type:
+                other_type = out[idx].physical_type
+                same_type = other_type == item.physical_type
+                diffuse_emission_pair = {other_type, item.physical_type} <= {"hii-region", "emission-nebula"}
+                if same_type or diffuse_emission_pair:
                     duplicate_idx = idx
                     break
             if duplicate_idx is not None:
@@ -453,6 +465,11 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int], dict[str, An
                 if k and k not in seen:
                     seen.add(k)
                     merged_aliases.append(alias)
+            # HII vs generic emission-nebula disagreements describe the same
+            # diffuse line-emission target. Prefer the less assumptive EmN class
+            # rather than duplicate the same aperture under two physical types.
+            if {old.physical_type, item.physical_type} == {"hii-region", "emission-nebula"}:
+                old.physical_type = "emission-nebula"
             # Prefer geometry with the larger resolved footprint.
             if item.major_arcmin * item.minor_arcmin > old.major_arcmin * old.minor_arcmin:
                 old.major_arcmin, old.minor_arcmin = item.major_arcmin, item.minor_arcmin
@@ -839,7 +856,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
     all_records: list[dict[str, Any]] = []
-    stats: dict[str, Any] = {"generatedAt": utc_now(), "builderVersion": 3}
+    stats: dict[str, Any] = {"generatedAt": utc_now(), "builderVersion": 4}
 
     with tempfile.TemporaryDirectory(prefix="astroplanner-signal-") as tmp:
         work_dir = Path(tmp)
