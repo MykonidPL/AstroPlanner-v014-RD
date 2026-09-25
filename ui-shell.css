@@ -465,3 +465,33 @@ body[data-page="home"] .bottomNav{opacity:0;pointer-events:none;transform:transl
   .mosaicSectionSummary small,.mosaicEditorHead>span{font-size:9px}
 }
 
+
+/* v0.14 R&D — flat, peer-level project detail sections */
+.projectPeerStack{display:grid;gap:8px;margin-top:10px}
+.projectPeerDetails{margin:0;border:1px solid var(--ui-border);border-radius:11px;background:rgba(11,19,33,.66);overflow:hidden}
+.projectPeerDetails>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:7px;align-items:center;padding:10px 11px;color:#d7e2f5;font-size:12px;font-weight:760}
+.projectPeerDetails>summary::-webkit-details-marker{display:none}
+.projectPeerDetails>summary .projectActionIcon{width:15px;height:15px}
+.projectPeerDetails>summary::after{content:'›';font-size:18px;line-height:1;color:#8fa7d1;transform:rotate(90deg);transition:transform .14s ease}
+.projectPeerDetails[open]>summary{border-bottom:1px solid var(--ui-border);background:rgba(18,30,50,.5)}
+.projectPeerDetails[open]>summary::after{transform:rotate(-90deg)}
+.projectPeerMeta{font-size:10px;font-weight:560;color:var(--ui-muted);white-space:nowrap}
+.projectPeerBody{padding:10px}
+.projectPeerBody .editGrid:first-child{margin-top:0}
+.projectPeerBody .projectManageActions{margin-top:0}
+.projectPeerBody .projectManageActions button{display:flex;align-items:center;justify-content:center;gap:7px}
+.projectPeerPlanWrap{padding:8px}
+.projectPeerPlanBody{margin:0;padding:0;border:0;background:transparent}
+.projectPeerPlanBody>.actions{margin-top:7px}
+.projectPeerPlanBody .materialPlanSummary{margin-top:8px}
+.projectPeerPlanBody .mosaicPanelCard:first-child{margin-top:0}
+.projectPeerMaterial{margin-top:0}
+.projectPeerMaterial .chip{font-size:10px}
+.projectDetailActions{display:none}
+@media(max-width:520px){
+  .projectPeerStack{gap:7px;margin-top:8px}
+  .projectPeerDetails>summary{padding:9px 10px;gap:6px}
+  .projectPeerMeta{font-size:9px;max-width:122px;overflow:hidden;text-overflow:ellipsis}
+  .projectPeerBody{padding:8px}
+  .projectPeerPlanWrap{padding:7px}
+}

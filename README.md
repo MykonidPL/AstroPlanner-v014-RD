@@ -36,6 +36,16 @@ Nowa instalacja startuje z pustą biblioteką teleskopów, kamer, filtrów, kore
 
 ## Historia zmian
 
+### v0.14 R&D — płaska hierarchia szczegółów projektu
+
+- po rozwinięciu **Szczegóły projektu** wszystkie sekcje pod podglądem kadru są równorzędnymi, zwijanymi blokami zamiast wielopoziomowej piramidy ramek,
+- **Edytuj projekt**, **Panele mozaiki / Plan materiału**, opcjonalny **Materiał z sesji** oraz **Zarządzanie projektem** są teraz osobnymi sekcjami na jednym poziomie,
+- edytor paneli nie jest już osadzony wewnątrz sekcji edycji danych projektu; same karty P1/P2/P3 pozostają zwarte i rozwijane wewnątrz sekcji paneli,
+- akcje zapisu są dostępne bezpośrednio w odpowiedniej sekcji (`Zapisz dane`, `Zapisz panele` / `Zapisz plan`),
+- opcja pustego filtra w planie materiału ma krótką etykietę `Brak`,
+- model danych, Score, sesje, geometria mozaiki i raster DSS2 pozostają bez zmian,
+- cache PWA R&D: `astroplanner-v014-rd-project-details-flat1`.
+
 ### v0.14 R&D — porządek UI edytora mozaiki
 
 - panele mozaiki są teraz zwijanymi kartami; jednocześnie rozwinięty jest najwyżej jeden panel,
