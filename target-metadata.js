@@ -1,5 +1,5 @@
-/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.6.
- * Stage 4B.5u: add reflection-nebula brightness metadata parser; signalTimeFactor unchanged.
+/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.7.
+ * Stage 4B.5w-a: route reflection-nebula vdB brightness through signal supplement plumbing; signalTimeFactor unchanged.
  * Score/recommendation integration is intentionally NOT part of this substage.
  */
 (function(global){
@@ -232,6 +232,7 @@
   function signalRichness(signal={}){
     let n=0;
     if(signal.quantitative===true&&Number.isFinite(signal.halphaRayleigh)&&signal.halphaRayleigh>0)n+=10;
+    if(signal.reflectionBrightnessClass)n+=12;
     if(Number.isFinite(signal.surfaceBrightnessMagArcsec2))n+=6;
     if(Number.isFinite(signal.opacityClass))n+=6;
     if(Number.isFinite(signal.integratedMagnitude))n+=2;
@@ -302,7 +303,7 @@
   async function prepareSignalData(projects,pool){
     const list=Array.isArray(projects)?projects:[],rows=Array.isArray(pool)?pool:[];indexPool(rows);
     let needSupplement=false,needLocal=false;
-    for(const project of list){const meta=projectMetadata(project,rows);if(meta.signalKind==='line')needLocal=true;if(meta.physicalType==='dark-nebula'&&!Number.isFinite(meta.signal?.opacityClass))needSupplement=true;if(needLocal&&needSupplement)break;}
+    for(const project of list){const meta=projectMetadata(project,rows);if(meta.signalKind==='line')needLocal=true;if(meta.physicalType==='dark-nebula'&&!Number.isFinite(meta.signal?.opacityClass))needSupplement=true;if(meta.physicalType==='reflection-nebula'&&!meta.signal?.reflectionBrightnessClass)needSupplement=true;if(needLocal&&needSupplement)break;}
     const jobs=[];if(needLocal)jobs.push(loadLocalSignalData());if(needSupplement)jobs.push(loadSignalSupplement());if(jobs.length)await Promise.all(jobs);
     return{localSignalReady,supplementReady:signalSupplementReady};
   }
