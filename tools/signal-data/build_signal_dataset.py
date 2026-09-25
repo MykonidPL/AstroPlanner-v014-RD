@@ -543,10 +543,16 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int], dict[str, An
             if not strong:
                 continue
             for idx in strong_index.get(strong, []):
-                other_type = out[idx].physical_type
+                other = out[idx]
+                other_type = other.physical_type
                 same_type = other_type == item.physical_type
                 diffuse_emission_pair = {other_type, item.physical_type} <= {"hii-region", "emission-nebula"}
-                if same_type or diffuse_emission_pair:
+                green_snr_override = (
+                    "supernova-remnant" in {other_type, item.physical_type}
+                    and {other_type, item.physical_type} <= {"supernova-remnant", "hii-region", "emission-nebula"}
+                    and (other.source_key == "green2025" or item.source_key == "green2025")
+                )
+                if same_type or diffuse_emission_pair or green_snr_override:
                     duplicate_idx = idx
                     break
             if duplicate_idx is not None:
@@ -589,8 +595,21 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int], dict[str, An
             # rather than duplicate the same aperture under two physical types.
             if {old.physical_type, item.physical_type} == {"hii-region", "emission-nebula"}:
                 old.physical_type = "emission-nebula"
-            # Prefer geometry with the larger resolved footprint.
-            if item.major_arcmin * item.minor_arcmin > old.major_arcmin * old.minor_arcmin:
+
+            # Green is authoritative for confirmed Galactic SNR identity and geometry.
+            # If a historical RCW/Sh2 alias was classified as HII/EmN elsewhere,
+            # collapse it into the Green SNR instead of keeping two physical classes.
+            if "supernova-remnant" in {old.physical_type, item.physical_type}:
+                green = old if old.source_key == "green2025" else item if item.source_key == "green2025" else None
+                if green is not None:
+                    old.source_key = green.source_key
+                    old.ra_deg = green.ra_deg
+                    old.dec_deg = green.dec_deg
+                    old.major_arcmin = green.major_arcmin
+                    old.minor_arcmin = green.minor_arcmin
+                    old.physical_type = "supernova-remnant"
+            # Otherwise prefer geometry with the larger resolved footprint.
+            elif item.major_arcmin * item.minor_arcmin > old.major_arcmin * old.minor_arcmin:
                 old.major_arcmin, old.minor_arcmin = item.major_arcmin, item.minor_arcmin
             old.aliases = merged_aliases
             for alias in merged_aliases:
@@ -979,7 +998,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
     all_records: list[dict[str, Any]] = []
-    stats: dict[str, Any] = {"generatedAt": utc_now(), "builderVersion": 5}
+    stats: dict[str, Any] = {"generatedAt": utc_now(), "builderVersion": 6}
 
     with tempfile.TemporaryDirectory(prefix="astroplanner-signal-") as tmp:
         work_dir = Path(tmp)
