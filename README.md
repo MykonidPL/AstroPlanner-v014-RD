@@ -20,7 +20,7 @@ https://mykonidpl.github.io/AstroPlanner/
 - **Projekty** — kolejka „Do realizacji”, aktywne i archiwalne cele wraz z postępem integracji.
 - **Planner** — pełna mapa nieba **DSS2 Color** z katalogowymi nazwami DSO, siatką RA/Dec i FOV setupu oraz wysokość obiektu, kulminacja, użyteczne okno, tryb nocy, Księżyc i lokalizacja/GPS. Raster jest pasywnym tłem; sterowanie mapą, FOV, rotacją i mozaiką pozostaje po stronie AstroPlannera.
 - **Dziennik** — historia wykonanych sesji pogrupowana według projektów.
-- **Sprzęt** — własna biblioteka teleskopów, kamer, korektorów, filtrów, profili setupów i materiału kalibracyjnego. Profile automatycznie wyliczają światłosiłę, skalę obrazu i FOV.
+- **Sprzęt** — własna biblioteka teleskopów, kamer, korektorów, filtrów, profili setupów i materiału kalibracyjnego. FOV i skala obrazu mogą być liczone z profilu albo z teleskopu, korektora/reduktora i kamery wybranych osobno.
 
 AstroPlanner działa jako PWA i jest projektowany przede wszystkim do wygodnej obsługi na telefonie oraz pracy terenowej.
 
@@ -35,6 +35,16 @@ W aplikacji dostępny jest eksport i import kopii zapasowej JSON. Przy regularny
 Nowa instalacja startuje z pustą biblioteką teleskopów, kamer, filtrów, korektorów i profili. Każdy użytkownik dodaje własny sprzęt. Aktualizacja nie usuwa sprzętu już zapisanego lokalnie w przeglądarce.
 
 ## Historia zmian
+
+### v0.14 R&D — FOV bez profilu / ręczny setup
+
+- profil setupu jest teraz opcjonalnym skrótem: w Plannerze, przy tworzeniu projektu i w edycji projektu można wybrać osobno teleskop, korektor/reduktor oraz kamerę/aparat,
+- po wybraniu profilu jego sprzęt jest automatycznie podstawiany; ręczna zmiana któregokolwiek elementu przełącza setup na tryb bez profilu,
+- FOV, skala obrazu i światłosiła są liczone także dla setupu ręcznego; projekt może więc korzystać z kadrowania bez utworzonego profilu,
+- ręczny setup jest zapisywany w istniejącym `setupDefaults`, bez migracji schematu danych; pierwsza sesja projektu może zostać nim automatycznie uzupełniona,
+- zmiana konfiguracji ręcznej wpływa na geometrię i podpis snapshotu kadru tak samo jak zmiana profilu,
+- stan bez zmian nie jest już prezentowany jako duży, nieaktywny przycisk: **Kadr zgodny z projektem** jest małym statusem, a **Zapisz kadr w projekcie** pojawia się dopiero po modyfikacji kadru,
+- cache PWA R&D: `astroplanner-v014-rd-adhoc-setup-fov1`.
 
 ### v0.14 R&D — płaska hierarchia szczegółów projektu
 

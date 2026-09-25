@@ -495,3 +495,30 @@ body[data-page="home"] .bottomNav{opacity:0;pointer-events:none;transform:transl
   .projectPeerBody{padding:8px}
   .projectPeerPlanWrap{padding:7px}
 }
+
+/* v0.14 R&D — FOV with profile or ad-hoc gear */
+.setupChooser{min-width:0;padding-top:4px}
+.setupChooserHead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px}
+.setupChooserHead b{font-size:12px;color:#e5edfc}
+.setupChooserHead span{font-size:9.5px;color:var(--ui-muted);white-space:nowrap}
+.setupProfileField{margin-top:0}
+.setupChooserDivider{display:flex;align-items:center;gap:8px;margin:7px 0 6px;color:#7889a7;font-size:9px;text-transform:uppercase;letter-spacing:.04em}
+.setupChooserDivider::before,.setupChooserDivider::after{content:'';height:1px;flex:1;background:rgba(157,181,225,.12)}
+.setupGearGrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:7px}
+.setupChooser label{font-size:10px;margin-bottom:3px}
+.setupChooser select{min-height:39px;padding:8px 9px;border-radius:9px;font-size:12px}
+.setupChooserPreview{margin-top:7px;padding:7px 9px;border-radius:8px;background:rgba(8,15,27,.46);color:#91a1bc;font-size:10px;line-height:1.45}
+.setupChooserPreview.good{color:#b9d7ff;background:rgba(38,70,116,.17)}
+.newProjectSetupChooser{grid-column:1/-1;padding:8px 0 2px;border-top:1px solid rgba(157,181,225,.10)}
+.projectEditSetupChooser{padding:8px 0 2px;border-top:1px solid rgba(157,181,225,.10);border-bottom:1px solid rgba(157,181,225,.08)}
+.plannerMapSetup{display:block;grid-template-columns:none;padding:8px 0 2px;border-top:1px solid rgba(157,181,225,.10)}
+.plannerMapSaveStatus{display:inline-flex;align-items:center;width:auto;margin-top:8px;padding:6px 9px;border:1px solid rgba(104,211,145,.28);border-radius:999px;background:rgba(35,92,64,.16);color:#9fe0b8;font-size:10px;font-weight:750;line-height:1.2}
+@media(max-width:620px){
+  .setupGearGrid{grid-template-columns:1fr 1fr}
+  .setupCameraField{grid-column:1/-1}
+}
+@media(max-width:430px){
+  .setupChooserHead{margin-bottom:6px}
+  .setupChooser select{min-height:37px;padding:7px 8px}
+  .setupChooserPreview{margin-top:6px;padding:6px 8px}
+}
