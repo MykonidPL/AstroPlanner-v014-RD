@@ -1,5 +1,5 @@
-/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.9.
- * Stage 4B.5w-c: add conservative derived-SB fallback for reflection nebulae without a valid vdB class.
+/* AstroPlanner v0.14 R&D — photographic + signal metadata v6.0.
+ * Stage 4B.6f: implement dark-nebula opacity/contrast signal-time model with strict opacity classes 1–6.
  * Score/recommendation integration is intentionally NOT part of this substage.
  */
 (function(global){
@@ -56,6 +56,7 @@
     planetaryNebula:Object.freeze({referenceRayleigh:1163.5,exponent:0.25}),
     broadbandGalaxy:Object.freeze({model:'surface-brightness-mag-arcsec2-v1',referenceMagArcsec2:23.1,exponent:0.40}),
     reflectionNebula:Object.freeze({model:'vdb-brightness-v1',q:1.25,classIndex:Object.freeze({'very-bright':-2,bright:-1,moderate:0,faint:1,'very-faint':2}),fallbackSurfaceBrightness:Object.freeze({model:'derived-surface-brightness-v1',referenceMagArcsec2:19.6,exponent:0.05,minFactor:0.80,maxFactor:1.25})}),
+    darkNebula:Object.freeze({model:'opacity-contrast-v1',referenceOpacityClass:4,avSlope:0.724,avIntercept:0.5}),
     minFactor:0.25,
     maxFactor:4.0,
     confidenceWeights:Object.freeze({high:1.00,medium:0.65,low:0.35})
@@ -197,8 +198,9 @@
     const magnitude=componentMismatch?null:catalogMagnitude;
     const catalogSurface=componentMismatch?null:catalogSurfaceRaw;
     const derivedSurface=meanSurfaceBrightness(magnitude,axes.majorArcmin,axes.minorArcmin);
-    const opacityRaw=finite(obj.opacityClass,props.opacityClass),opacityClass=opacityRaw!=null&&opacityRaw>=1&&opacityRaw<=6?Math.round(opacityRaw):null;
-    const extinctionAv=opacityClass!=null?0.724*opacityClass+0.5:null;
+    const opacityRaw=finite(obj.opacityClass,props.opacityClass),opacityClass=Number.isInteger(opacityRaw)&&opacityRaw>=1&&opacityRaw<=6?opacityRaw:null;
+    const darkCalibration=SIGNAL_TIME_CONFIG.darkNebula;
+    const extinctionAv=opacityClass!=null?darkCalibration.avSlope*opacityClass+darkCalibration.avIntercept:null;
     const absorptionContrast=extinctionAv!=null?1-Math.pow(10,-0.4*extinctionAv):null;
     const useSurface=['galaxy','galaxy-pair','galaxy-triplet','reflection-nebula'].includes(base.physicalType);
     let model='unknown',confidence='low';
@@ -320,6 +322,14 @@
       const calibration=SIGNAL_TIME_CONFIG.reflectionNebula.fallbackSurfaceBrightness;
       const raw=Math.pow(10,calibration.exponent*(s.surfaceBrightnessMagArcsec2-calibration.referenceMagArcsec2));
       return Math.min(calibration.maxFactor,Math.max(calibration.minFactor,raw));
+    }
+    const darkOpacity=meta?.physicalType==='dark-nebula'&&s.model==='dark-opacity'&&Number.isInteger(s.opacityClass)&&s.opacityClass>=1&&s.opacityClass<=6&&Number.isFinite(s.absorptionContrast)&&s.absorptionContrast>0;
+    if(darkOpacity){
+      const calibration=SIGNAL_TIME_CONFIG.darkNebula;
+      const referenceAv=calibration.avSlope*calibration.referenceOpacityClass+calibration.avIntercept;
+      const referenceContrast=1-Math.pow(10,-0.4*referenceAv);
+      const rawUnclamped=Math.pow(referenceContrast/s.absorptionContrast,2);
+      return Math.min(SIGNAL_TIME_CONFIG.maxFactor,Math.max(SIGNAL_TIME_CONFIG.minFactor,rawUnclamped));
     }
     const galaxySurface=['galaxy','galaxy-pair','galaxy-triplet'].includes(meta?.physicalType)&&s.model==='surface-brightness'&&Number.isFinite(s.surfaceBrightnessMagArcsec2);
     if(galaxySurface){
