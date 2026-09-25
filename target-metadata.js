@@ -1,5 +1,5 @@
-/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.4.
- * Stage 4B.3g: separate H-alpha signalTimeFactor calibration for planetary nebulae.
+/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.5.
+ * Stage 4B.4i: add broadband galaxy surface-brightness calibration to signalTimeFactor.
  * Score/recommendation integration is intentionally NOT part of this substage.
  */
 (function(global){
@@ -54,6 +54,7 @@
     referenceRayleigh:15,
     exponent:0.50,
     planetaryNebula:Object.freeze({referenceRayleigh:1163.5,exponent:0.25}),
+    broadbandGalaxy:Object.freeze({model:'surface-brightness-mag-arcsec2-v1',referenceMagArcsec2:23.1,exponent:0.40}),
     minFactor:0.25,
     maxFactor:4.0,
     confidenceWeights:Object.freeze({high:1.00,medium:0.65,low:0.35})
@@ -291,13 +292,20 @@
 
   function signalTimeFactor(meta){
     const s=meta?.signal||{};
+    const confidenceWeight=SIGNAL_TIME_CONFIG.confidenceWeights[s.confidence]??SIGNAL_TIME_CONFIG.confidenceWeights.low;
+    const galaxySurface=['galaxy','galaxy-pair','galaxy-triplet'].includes(meta?.physicalType)&&s.model==='surface-brightness'&&Number.isFinite(s.surfaceBrightnessMagArcsec2);
+    if(galaxySurface){
+      const calibration=SIGNAL_TIME_CONFIG.broadbandGalaxy;
+      const rawUnclamped=Math.pow(10,calibration.exponent*(s.surfaceBrightnessMagArcsec2-calibration.referenceMagArcsec2));
+      const raw=Math.min(SIGNAL_TIME_CONFIG.maxFactor,Math.max(SIGNAL_TIME_CONFIG.minFactor,rawUnclamped));
+      return Math.pow(raw,confidenceWeight);
+    }
     const quantitativeHalpha=(s.model==='halpha-surface-brightness'||s.model==='halpha-pn')&&s.quantitative===true&&Number.isFinite(s.halphaRayleigh)&&s.halphaRayleigh>0;
     if(!quantitativeHalpha)return 1.0;
     const isPlanetaryNebula=meta?.physicalType==='planetary-nebula'||s.model==='halpha-pn';
     const calibration=isPlanetaryNebula?SIGNAL_TIME_CONFIG.planetaryNebula:SIGNAL_TIME_CONFIG;
     const rawUnclamped=Math.pow(calibration.referenceRayleigh/s.halphaRayleigh,calibration.exponent);
     const raw=Math.min(SIGNAL_TIME_CONFIG.maxFactor,Math.max(SIGNAL_TIME_CONFIG.minFactor,rawUnclamped));
-    const confidenceWeight=SIGNAL_TIME_CONFIG.confidenceWeights[s.confidence]??SIGNAL_TIME_CONFIG.confidenceWeights.low;
     return Math.pow(raw,confidenceWeight);
   }
 
