@@ -36,6 +36,16 @@ Nowa instalacja startuje z pustą biblioteką teleskopów, kamer, filtrów, kore
 
 ## Historia zmian
 
+### v0.14 R&D — fundament wiarygodności danych sygnałowych
+
+- poprawiono systemowy błąd parsowania danych katalogowych: `null`, puste wartości i boolean nie są już zamieniane przez `Number(...)` na prawidłowe liczby; w szczególności brak magnitudo nie może stać się `m = 0`,
+- scalanie lokalnego katalogu z katalogiem rozszerzonym nie traktuje już `mag: null` jako poprawnej fotometrii i może przyjąć rzeczywistą wartość z lepszego źródła,
+- `line-flux-missing` ma pierwszeństwo w opisie sygnału przed generycznym magnitudo, więc obiekt emisyjny bez pomiaru liniowego nie pokazuje fałszywego `m ≈ 0.00`,
+- Score rozróżnia status danych celu: `quantitative`, `descriptive` i `missing`; brak ilościowych danych pozostaje wkładem neutralnym zamiast być interpretowany jako zerowy sygnał,
+- ranking rozdziela dwa różne ostrzeżenia: brak ilościowych danych **celu** oraz niepełny ilościowy model **materiału/filtra**; przy materiale pokazuje procent planu objęty modelem ilościowym,
+- formuła Score dla obiektów z już poprawnymi danymi ilościowymi nie została zmieniona; ten patch porządkuje wejście, semantykę braków i komunikaty przed budową zbiorczego datasetu Hα/PN,
+- cache PWA R&D: `astroplanner-v014-rd-signal-foundation1`.
+
 ### v0.14 R&D — FOV bez profilu / ręczny setup
 
 - profil setupu jest teraz opcjonalnym skrótem: w Plannerze, przy tworzeniu projektu i w edycji projektu można wybrać osobno teleskop, korektor/reduktor oraz kamerę/aparat,

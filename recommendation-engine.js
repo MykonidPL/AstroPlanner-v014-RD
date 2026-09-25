@@ -73,14 +73,15 @@
     const s=metadata?.signal||{},mu=Number(s.surfaceBrightnessMagArcsec2);
     if(s.model==='surface-brightness'&&Number.isFinite(mu)){
       const raw=Math.pow(10,.8*(mu-REFERENCE_SURFACE_BRIGHTNESS));
-      return{factor:clamp(raw,.08,100),model:'surface-brightness',confidence:s.confidence||'medium',summary:global.AstroTargetMetadata?.signalSummary?.(metadata)||`μ ≈ ${mu.toFixed(2)} mag/arcsec²`};
+      return{factor:clamp(raw,.08,100),model:'surface-brightness',confidence:s.confidence||'medium',dataStatus:'quantitative',summary:global.AstroTargetMetadata?.signalSummary?.(metadata)||`μ ≈ ${mu.toFixed(2)} mag/arcsec²`};
     }
     const contrast=Number(s.absorptionContrast);
     if(s.model==='dark-opacity'&&Number.isFinite(contrast)&&contrast>0){
       const raw=Math.pow(REFERENCE_DARK_CONTRAST/contrast,2);
-      return{factor:clamp(raw,.65,4),model:'dark-opacity',confidence:s.confidence||'medium',summary:global.AstroTargetMetadata?.signalSummary?.(metadata)||`opacity ${s.opacityClass}/6`};
+      return{factor:clamp(raw,.65,4),model:'dark-opacity',confidence:s.confidence||'medium',dataStatus:'quantitative',summary:global.AstroTargetMetadata?.signalSummary?.(metadata)||`opacity ${s.opacityClass}/6`};
     }
-    return{factor:1,model:s.model||'unknown',confidence:s.confidence||'low',summary:global.AstroTargetMetadata?.signalSummary?.(metadata)||'brak ilościowych danych o sygnale'};
+    const dataStatus=global.AstroTargetMetadata?.signalDataStatus?.(metadata)||(s.model==='integrated-magnitude'&&Number.isFinite(Number(s.integratedMagnitude))?'descriptive':'missing');
+    return{factor:1,model:s.model||'unknown',confidence:s.confidence||'low',dataStatus,summary:global.AstroTargetMetadata?.signalSummary?.(metadata)||'brak ilościowych danych o sygnale'};
   }
 
   function scoreTarget({raDeg,decDeg,classKey='mixed',metadata=null,materialProfile=null,context,astro,sky=null,minAltitudeDeg=30,sunLimitDeg=-18}){
@@ -111,9 +112,9 @@
     const signal=signalTimeDemand(metadata),signalTimeFactor=signal.factor,filterSignalTimeFactor=1/(compatibility*compatibility),effectiveTimeDemand=Math.max(.02,timeMultiplier*signalTimeFactor*filterSignalTimeFactor),snrEfficiency=clamp(1/Math.sqrt(effectiveTimeDemand),0,1);
     const score=Math.round(clamp(geometryScore*snrEfficiency,0,100));
     const backgroundPenalty=100*(1-clamp(1/Math.sqrt(Math.max(1,timeMultiplier)),0,1)),compatibilityPenalty=100*(1-compatibility),materialNote=materialProfile.label||'materiał nieokreślony';
-    const signalNote=signal.confidence==='low'?`${signal.summary} (bez sztucznego bonusu)` : signal.summary;
+    const signalNote=signal.dataStatus==='missing'?`${signal.summary} (wkład neutralny)`:signal.dataStatus==='descriptive'?`${signal.summary} (dane opisowe; wkład neutralny)`:signal.summary;
     const reason=`${score}/100 — ${scoreLabel(score)}; ${windowPhrase(usableHours)} (${usableHours.toFixed(1)} h), ${coveragePhrase(coverage)}, ${moonImpactPhrase(moonTimeFactor)}; sygnał: ${signalNote}.`;
-    return{score,label:scoreLabel(score),classKey:metadata.photoClass||classKey||'mixed',reason,materialNote,metrics:{geometryScore,usableHours,totalNightHours,coverage,longestWindow:window.hours,windowStart:window.start,windowEnd:window.end,bestImagingAltitude,meanTransmission,siteRatio,siteMaterialRatio:siteMaterialZenithRatio,timeMultiplier,moonTimeFactor,twilightTimeFactor,backgroundPenalty,compatibility,compatibilityPenalty,lpResponse,moonResponse,rawLpResponse,rawMoonResponse,minAltitudeDeg,sunLimitDeg,signalTimeFactor,signalModel:signal.model,signalConfidence:signal.confidence,signalSummary:signal.summary,filterSignalTimeFactor,effectiveTimeDemand,snrEfficiency,referenceSurfaceBrightness:REFERENCE_SURFACE_BRIGHTNESS}};
+    return{score,label:scoreLabel(score),classKey:metadata.photoClass||classKey||'mixed',reason,materialNote,metrics:{geometryScore,usableHours,totalNightHours,coverage,longestWindow:window.hours,windowStart:window.start,windowEnd:window.end,bestImagingAltitude,meanTransmission,siteRatio,siteMaterialRatio:siteMaterialZenithRatio,timeMultiplier,moonTimeFactor,twilightTimeFactor,backgroundPenalty,compatibility,compatibilityPenalty,lpResponse,moonResponse,rawLpResponse,rawMoonResponse,minAltitudeDeg,sunLimitDeg,signalTimeFactor,signalModel:signal.model,signalConfidence:signal.confidence,signalDataStatus:signal.dataStatus,signalSummary:signal.summary,filterSignalTimeFactor,effectiveTimeDemand,snrEfficiency,referenceSurfaceBrightness:REFERENCE_SURFACE_BRIGHTNESS}};
   }
 
   function installPlannerRecommendationHub(){

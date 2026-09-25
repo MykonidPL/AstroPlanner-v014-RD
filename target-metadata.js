@@ -53,7 +53,7 @@
   const SIGNAL_SUPPLEMENT_URL='https://raw.githubusercontent.com/acocalypso/celestia_atlas/ef52c7ea920191d45fe0da4711dd3b1cc9220c18/data/stellarium-dso-supplement.json';
   const strip=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ł/g,'l').replace(/Ł/g,'L').toLowerCase();
   const compact=value=>strip(value).replace(/[^a-z0-9]+/g,'');
-  const finite=(...values)=>{for(const value of values){const n=Number(value);if(Number.isFinite(n))return n;}return null;};
+  const finite=(...values)=>{for(const value of values){if(value==null||typeof value==='boolean'||(typeof value==='string'&&!value.trim()))continue;const n=Number(value);if(Number.isFinite(n))return n;}return null;};
 
   function identityTokens(objOrText){
     const texts=[];
@@ -228,13 +228,21 @@
     return{supplementReady:signalSupplementReady};
   }
 
+  function signalDataStatus(meta){
+    const s=meta?.signal||{};
+    if(s.model==='surface-brightness'&&Number.isFinite(s.surfaceBrightnessMagArcsec2))return'quantitative';
+    if(s.model==='dark-opacity'&&Number.isFinite(s.opacityClass))return'quantitative';
+    if(s.model==='integrated-magnitude'&&Number.isFinite(s.integratedMagnitude))return'descriptive';
+    return'missing';
+  }
+
   function signalSummary(meta){
     const s=meta?.signal||{};
     if(s.model==='component-mismatch')return'fotometria katalogowa dotyczy składnika gwiazdowego, nie pyłu/refleksów';
+    if(s.model==='line-flux-missing')return'brak ilościowego pomiaru emisji liniowej';
     if(s.model==='surface-brightness'&&Number.isFinite(s.surfaceBrightnessMagArcsec2)){const src=s.surfaceBrightnessSource==='catalog'?'katalogowa':'wyliczona z magnitudo i rozmiaru';return`μ ≈ ${s.surfaceBrightnessMagArcsec2.toFixed(2)} mag/arcsec² (${src})`;}
     if(s.model==='dark-opacity'&&Number.isFinite(s.opacityClass))return`opacity ${s.opacityClass}/6 · Aᵥ ≈ ${s.extinctionAv.toFixed(1)} mag`;
-    if(Number.isFinite(s.integratedMagnitude))return`m ≈ ${s.integratedMagnitude.toFixed(2)}${s.magnitudeBand?` ${s.magnitudeBand}`:''}`;
-    if(s.model==='line-flux-missing')return'brak porównywalnego strumienia liniowego w obecnym katalogu';
+    if(s.model==='integrated-magnitude'&&Number.isFinite(s.integratedMagnitude))return`m ≈ ${s.integratedMagnitude.toFixed(2)}${s.magnitudeBand?` ${s.magnitudeBand}`:''}`;
     return'brak ilościowych danych o sygnale';
   }
 
@@ -244,5 +252,5 @@
     return{total:rows.length,byClass,byPhysical,byTypeCode,bySource,bySignalModel,unknownTypeCodes:[...unknownTypeCodes].sort(),lowConfidenceCount:lowConfidence.length,lowConfidence:lowConfidence.slice(0,200)};
   }
 
-  global.AstroTargetMetadata={TYPE_META,CLASS_LABELS,PHYSICAL_LABELS,metadataForObject,projectMetadata,prepareSignalData,attach,attachPool,indexPool,audit,signalSummary,meanSurfaceBrightness,photoClassLabel:key=>CLASS_LABELS[key]||CLASS_LABELS.mixed,physicalLabel:key=>PHYSICAL_LABELS[key]||PHYSICAL_LABELS.other};
+  global.AstroTargetMetadata={TYPE_META,CLASS_LABELS,PHYSICAL_LABELS,metadataForObject,projectMetadata,prepareSignalData,attach,attachPool,indexPool,audit,signalSummary,signalDataStatus,meanSurfaceBrightness,photoClassLabel:key=>CLASS_LABELS[key]||CLASS_LABELS.mixed,physicalLabel:key=>PHYSICAL_LABELS[key]||PHYSICAL_LABELS.other};
 })(window);
