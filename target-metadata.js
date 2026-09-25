@@ -1,5 +1,5 @@
-/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.8.
- * Stage 4B.5w-b: apply vdB reflection-brightness classes in signalTimeFactor; weak SB fallback remains disabled.
+/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.9.
+ * Stage 4B.5w-c: add conservative derived-SB fallback for reflection nebulae without a valid vdB class.
  * Score/recommendation integration is intentionally NOT part of this substage.
  */
 (function(global){
@@ -55,7 +55,7 @@
     exponent:0.50,
     planetaryNebula:Object.freeze({referenceRayleigh:1163.5,exponent:0.25}),
     broadbandGalaxy:Object.freeze({model:'surface-brightness-mag-arcsec2-v1',referenceMagArcsec2:23.1,exponent:0.40}),
-    reflectionNebula:Object.freeze({model:'vdb-brightness-v1',q:1.25,classIndex:Object.freeze({'very-bright':-2,bright:-1,moderate:0,faint:1,'very-faint':2})}),
+    reflectionNebula:Object.freeze({model:'vdb-brightness-v1',q:1.25,classIndex:Object.freeze({'very-bright':-2,bright:-1,moderate:0,faint:1,'very-faint':2}),fallbackSurfaceBrightness:Object.freeze({model:'derived-surface-brightness-v1',referenceMagArcsec2:19.6,exponent:0.05,minFactor:0.80,maxFactor:1.25})}),
     minFactor:0.25,
     maxFactor:4.0,
     confidenceWeights:Object.freeze({high:1.00,medium:0.65,low:0.35})
@@ -315,6 +315,12 @@
     const reflectionClass=meta?.physicalType==='reflection-nebula'?s.reflectionBrightnessClass:null;
     const reflectionIndex=SIGNAL_TIME_CONFIG.reflectionNebula.classIndex[reflectionClass];
     if(Number.isFinite(reflectionIndex))return Math.pow(SIGNAL_TIME_CONFIG.reflectionNebula.q,reflectionIndex);
+    const reflectionSurfaceFallback=meta?.physicalType==='reflection-nebula'&&!reflectionClass&&s.model==='surface-brightness'&&s.surfaceBrightnessSource==='derived-from-magnitude-and-size'&&s.photometryAppliesTo!=='stellar-component'&&Number.isFinite(s.surfaceBrightnessMagArcsec2);
+    if(reflectionSurfaceFallback){
+      const calibration=SIGNAL_TIME_CONFIG.reflectionNebula.fallbackSurfaceBrightness;
+      const raw=Math.pow(10,calibration.exponent*(s.surfaceBrightnessMagArcsec2-calibration.referenceMagArcsec2));
+      return Math.min(calibration.maxFactor,Math.max(calibration.minFactor,raw));
+    }
     const galaxySurface=['galaxy','galaxy-pair','galaxy-triplet'].includes(meta?.physicalType)&&s.model==='surface-brightness'&&Number.isFinite(s.surfaceBrightnessMagArcsec2);
     if(galaxySurface){
       const calibration=SIGNAL_TIME_CONFIG.broadbandGalaxy;
