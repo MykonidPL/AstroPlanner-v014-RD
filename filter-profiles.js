@@ -64,15 +64,29 @@
 
   function projectProfile(project,equipment){
     const eq=equipment||{filters:[],profiles:[]},filters=new Map((eq.filters||[]).map(f=>[String(f.id),f])),profiles=new Map((eq.profiles||[]).map(p=>[String(p.id),p]));
-    const parts=[];
-    const plan=Array.isArray(project?.materialPlan)?project.materialPlan.filter(x=>Number(x?.goal)>0):[];
-    if(plan.length){
-      for(const item of plan){const weight=Number(item.goal)||0,filter=filters.get(String(item.filterId||'')),profile=filter?profileForFilter(filter):inferFromPlanName(item.name);parts.push({weight,profile:profile||{kind:'unknown',label:'materiał nieokreślony',moonResponse:1,lpResponse:1,signalMode:'unknown',quantitative:false,assumed:true,source:'missing'},resolved:!!profile});}
+    const parts=[],unknown={kind:'unknown',label:'materiał nieokreślony',moonResponse:1,lpResponse:1,signalMode:'unknown',quantitative:false,assumed:true,source:'missing'};
+    let defaultFilterId=String(project?.setupDefaults?.filterId||'');if(!defaultFilterId&&project?.profileId){const p=profiles.get(String(project.profileId));if(p)defaultFilterId=String(p.filterId||'');}
+    const defaultFilter=filters.get(defaultFilterId),defaultProfile=defaultFilter?profileForFilter(defaultFilter):null;
+    const addItem=(item,weightOverride=null)=>{
+      const weight=weightOverride==null?(Number(item?.goal)||0):Number(weightOverride)||0;if(!(weight>0))return;
+      const filter=filters.get(String(item?.filterId||'')),profile=filter?profileForFilter(filter):inferFromPlanName(item?.name);
+      parts.push({weight,profile:profile||unknown,resolved:!!profile});
+    };
+    const directPlan=Array.isArray(project?.materialPlan)?project.materialPlan.filter(x=>Number(x?.goal)>0):[];
+    if(directPlan.length){
+      directPlan.forEach(item=>addItem(item));
     }else{
-      let filterId=String(project?.setupDefaults?.filterId||'');if(!filterId&&project?.profileId){const p=profiles.get(String(project.profileId));if(p)filterId=String(p.filterId||'');}
-      const f=filters.get(filterId);if(f){const p=profileForFilter(f);parts.push({weight:1,profile:p,resolved:true});}
+      const panels=project?.projectType==='mosaic'&&Array.isArray(project?.mosaicPanels)?project.mosaicPanels.filter(x=>Number(x?.goal)>0||Array.isArray(x?.materialPlan)):[];
+      const hasNested=panels.some(panel=>Array.isArray(panel?.materialPlan)&&panel.materialPlan.some(x=>Number(x?.goal)>0));
+      if(hasNested){
+        for(const panel of panels){
+          const plan=Array.isArray(panel?.materialPlan)?panel.materialPlan.filter(x=>Number(x?.goal)>0):[];
+          if(plan.length)plan.forEach(item=>addItem(item));
+          else{const weight=Number(panel?.goal)||0;if(weight>0)parts.push({weight,profile:defaultProfile||unknown,resolved:!!defaultProfile});}
+        }
+      }else if(defaultProfile)parts.push({weight:1,profile:defaultProfile,resolved:true});
     }
-    if(!parts.length)parts.push({weight:1,profile:{kind:'unknown',label:'materiał nieokreślony',moonResponse:1,lpResponse:1,signalMode:'unknown',quantitative:false,assumed:true,source:'missing'},resolved:false});
+    if(!parts.length)parts.push({weight:1,profile:unknown,resolved:false});
     const total=parts.reduce((a,p)=>a+p.weight,0)||1;
     const moonResponse=parts.reduce((a,p)=>a+p.weight*p.profile.moonResponse,0)/total,lpResponse=parts.reduce((a,p)=>a+p.weight*p.profile.lpResponse,0)/total;
     const resolvedFraction=parts.reduce((a,p)=>a+(p.resolved?p.weight:0),0)/total,quantitativeFraction=parts.reduce((a,p)=>a+(p.profile.quantitative?p.weight:0),0)/total;

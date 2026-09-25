@@ -234,11 +234,8 @@ body[data-page="home"] .bottomNav{opacity:0;pointer-events:none;transform:transl
 .projectSnapshotImage{display:block;object-fit:cover;opacity:0;transition:opacity .16s ease}
 .projectSnapshotHost.snapshotReady .projectSnapshotImage{opacity:1}
 .projectSnapshotHost.snapshotReady .projectSnapshotFallback{opacity:0}
-.projectSnapshotBadge{position:absolute;right:8px;bottom:8px;z-index:2;display:none;padding:4px 7px;border:1px solid rgba(255,255,255,.16);border-radius:999px;background:rgba(6,12,22,.72);backdrop-filter:blur(6px);font-size:9px;font-weight:800;letter-spacing:.04em;color:#dce8ff}
-.projectSnapshotHost.snapshotReady .projectSnapshotBadge{display:block}
 .framingPreviewCanvas>.projectSnapshotHost{height:100%}
 .journalProjectSnapshot{height:auto;aspect-ratio:36/17;min-height:0;margin:10px 0 3px;border:1px solid rgba(157,181,225,.14);border-radius:11px}
-.journalProjectSnapshot .projectSnapshotBadge{right:7px;bottom:7px}
 
 
 /* Compact session entry */
@@ -399,3 +396,30 @@ body[data-page="home"] .bottomNav{opacity:0;pointer-events:none;transform:transl
   .journalInner{padding:4px 8px 9px}
   .journalProjectSnapshot{margin:7px 0 3px}
 }
+
+/* v0.14 R&D — install action and mosaic material plans */
+.homeInstallBtn{margin-top:22px;min-width:210px;padding:11px 18px}
+.homeInstallBtn[hidden]{display:none!important}
+
+.mosaicPanelCard{margin-top:10px;padding:10px;border:1px solid #2b3d61;border-radius:12px;background:#0a1322}
+.mosaicPanelCard:first-child{margin-top:8px}
+.mosaicPanelMaterialEditor{margin-top:10px;padding-top:10px;border-top:1px solid #243553}
+.mosaicPanelMaterialHead{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:4px}
+.mosaicPanelMaterialHead b{font-size:12px;color:#e4ecff}
+.mosaicPanelMaterialHead span{font-size:10px;color:var(--muted)}
+.mosaicPanelMaterialRow{margin-top:7px}
+.mosaicAddMaterialBtn{width:100%;margin-top:8px}
+.mosaicPanelMaterialEditor>.small{margin-top:7px}
+
+.mosaicNestedProgress{margin-top:9px;padding:8px;border:1px solid #263654;border-radius:9px;background:#091220}
+.mosaicNestedProgressItem{padding:8px 0;border-top:1px solid #202f4b}
+.mosaicNestedProgressItem:first-child{padding-top:0;border-top:0}
+.mosaicNestedProgressItem:last-child{padding-bottom:0}
+.mosaicNestedProgressItem .progress{height:6px;margin-top:7px}
+.mosaicPanelProgress>.materialPlanProgressMeta{margin-bottom:2px}
+
+@media(max-width:520px){
+  .homeInstallBtn{width:min(100%,260px)}
+  .mosaicPanelCard{padding:9px}
+}
+

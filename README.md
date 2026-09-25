@@ -36,6 +36,20 @@ Nowa instalacja startuje z pustą biblioteką teleskopów, kamer, filtrów, kore
 
 ## Historia zmian
 
+### v0.14 R&D — mozaika: materiał per panel + poprawki UX/PWA
+
+- każdy panel mozaiki może mieć teraz własne składniki materiału z osobnym celem godzinowym, planowaną ekspozycją i filtrem; cel panelu jest automatycznie sumą jego składników,
+- zachowano pełną kompatybilność ze starszymi projektami mozaikowymi, w których panel ma tylko pojedynczy cel godzinowy,
+- formularz sesji dla mozaiki prowadzi przez **panel → składnik panelu**; zapis sesji przechowuje oba przypisania, a postęp projektu liczy materiał osobno dla każdego składnika,
+- szczegóły projektu pokazują zagnieżdżony postęp paneli i ich składników; Planner uwzględnia ich ekspozycje przy wyliczaniu planowanej liczby klatek,
+- Score/rekomendacje rozpoznają również materiał zagnieżdżony w panelach mozaiki i agregują go wagą godzin,
+- usunięto plakietkę `DSS2` z zapisanego podglądu kadru,
+- w zakładkach **Do realizacji** i **Aktywne** usunięto redundantny badge statusu; w Archiwum pozostaje rozróżnienie `Wstrzymany` / `Ukończony`,
+- Enter w zwykłych polach nie przenosi już fokusu do kolejnej rubryki; wyszukiwarka obiektów zachowuje własną obsługę Enter,
+- pola liczby wierszy, kolumn i overlapu mozaiki można teraz normalnie wyczyścić Backspace i wpisać nową wartość bez natychmiastowego przywracania starego stanu,
+- przywrócono na ekranie Start przycisk **Zainstaluj aplikację**; pojawia się wyłącznie wtedy, gdy przeglądarka udostępni natywny prompt instalacji PWA,
+- cache PWA R&D: `astroplanner-v014-rd-mosaic-material1`.
+
 ### v0.14 R&D — czysty Start / usunięcie FOUC
 
 - minimalistyczny ekran Start jest teraz zapisany bezpośrednio w `index.html`, więc stary ekran nie może pojawić się na pierwszej klatce renderowania,
