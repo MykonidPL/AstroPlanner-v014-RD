@@ -152,6 +152,37 @@ def normalize_alias(value: str) -> str:
     return s
 
 
+def catalog_identity_key(value: str) -> str | None:
+    """Return a strong catalogue identity safe for cross-catalog deduplication.
+
+    This intentionally requires a full-string match for Messier identifiers so
+    planetary-nebula designations such as ``M 1-7`` can never collapse onto M17.
+    """
+    s = normalize_alias(value)
+    patterns = (
+        (r"^M\s*0*(\d{1,3})$", "M"),
+        (r"^NGC\s*0*(\d+)$", "NGC"),
+        (r"^IC\s*0*(\d+)$", "IC"),
+        (r"^SH\s*2[-\s]*0*(\d+)$", "SH2"),
+        (r"^RCW\s*0*(\d+)$", "RCW"),
+        (r"^LBN\s*0*(\d+)$", "LBN"),
+        (r"^LDN\s*0*(\d+)$", "LDN"),
+        (r"^CTB\s*0*(\d+)$", "CTB"),
+        (r"^G\s*(\d+(?:\.\d+)?[+-]\d+(?:\.\d+)?)$", "G"),
+    )
+    for pattern, prefix in patterns:
+        m = re.fullmatch(pattern, s)
+        if m:
+            return prefix + m.group(1)
+    return None
+
+
+def unsafe_pn_name_alias(value: str) -> bool:
+    """Reject PN shorthand that can collide with Messier identity tokens."""
+    s = normalize_alias(value)
+    return bool(re.fullmatch(r"(?:PN\s+)?M\s*\d+\s*-\s*\d+", s))
+
+
 def aliases_from_record(r: dict[str, Any]) -> list[str]:
     out: list[str] = []
     for key in ("id", "catalogId", "name", "displayName", "primaryName", "commonName", "aliases", "identifiers", "crossIds", "catalogIds"):
@@ -357,23 +388,38 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int], dict[str, An
             accepted_by_type[physical] += 1
         diagnostics["bySource"][source_key] = dict(src)
 
-    # Cross-catalog deduplication: exact normalized alias + nearby coordinates.
+    # Cross-catalog deduplication. Strong catalogue identifiers are authoritative
+    # even when two catalogues choose noticeably different centres/footprints.
+    # Free-text aliases still require nearby coordinates to avoid name collisions.
     out: list[MapTarget] = []
     alias_index: dict[str, list[int]] = defaultdict(list)
+    strong_index: dict[str, list[int]] = defaultdict(list)
     for item in sorted(candidates, key=lambda t: (t.physical_type, -t.major_arcmin)):
         duplicate_idx: int | None = None
         for alias in item.aliases:
-            key = normalize_alias(alias)
-            if not key:
+            strong = catalog_identity_key(alias)
+            if not strong:
                 continue
-            for idx in alias_index.get(key, []):
-                other = out[idx]
-                # generous only after an exact alias match
-                if abs(other.ra_deg - item.ra_deg) <= 0.15 and abs(other.dec_deg - item.dec_deg) <= 0.15:
+            for idx in strong_index.get(strong, []):
+                if out[idx].physical_type == item.physical_type:
                     duplicate_idx = idx
                     break
             if duplicate_idx is not None:
                 break
+        if duplicate_idx is None:
+            for alias in item.aliases:
+                key = normalize_alias(alias)
+                if not key:
+                    continue
+                for idx in alias_index.get(key, []):
+                    other = out[idx]
+                    if other.physical_type != item.physical_type:
+                        continue
+                    if abs(other.ra_deg - item.ra_deg) <= 0.15 and abs(other.dec_deg - item.dec_deg) <= 0.15:
+                        duplicate_idx = idx
+                        break
+                if duplicate_idx is not None:
+                    break
         if duplicate_idx is None:
             idx = len(out)
             out.append(item)
@@ -381,6 +427,9 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int], dict[str, An
                 key = normalize_alias(alias)
                 if key:
                     alias_index[key].append(idx)
+                strong = catalog_identity_key(alias)
+                if strong:
+                    strong_index[strong].append(idx)
         else:
             old = out[duplicate_idx]
             merged_aliases = list(old.aliases)
@@ -394,6 +443,10 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int], dict[str, An
             if item.major_arcmin * item.minor_arcmin > old.major_arcmin * old.minor_arcmin:
                 old.major_arcmin, old.minor_arcmin = item.major_arcmin, item.minor_arcmin
             old.aliases = merged_aliases
+            for alias in merged_aliases:
+                strong = catalog_identity_key(alias)
+                if strong and duplicate_idx not in strong_index[strong]:
+                    strong_index[strong].append(duplicate_idx)
 
     diagnostics["classifiedByType"] = dict(sorted(classified_by_type.items()))
     diagnostics["acceptedBeforeDedupByType"] = dict(sorted(accepted_by_type.items()))
@@ -447,7 +500,10 @@ def sample_halpha_map(map_values: np.ndarray, target: MapTarget) -> dict[str, An
     excess90 = max(0.0, p90 - bg50)
 
     # Resolution/confidence describes the measurement, not target astrophysics.
+    # A target narrower than the 6 arcmin beam is not spatially resolved by this map;
+    # its aperture value may be dominated by surrounding diffuse H-alpha.
     min_axis = min(target.major_arcmin, target.minor_arcmin)
+    resolved_for_quantitative = min_axis >= 6.0
     if min_axis >= 18:
         resolution_confidence = "high"
     elif min_axis >= 12:
@@ -455,7 +511,8 @@ def sample_halpha_map(map_values: np.ndarray, target: MapTarget) -> dict[str, An
     else:
         resolution_confidence = "low"
 
-    # Do not interpret weak excess as zero emission; mark as non-quantitative detection.
+    # Do not interpret weak excess as zero emission; keep it as a measured
+    # non-detection so runtime can remain neutral rather than inventing signal.
     detect_floor = max(0.05, 0.08 * max(bg50, 0.0))
     detected = excess75 > detect_floor
     return {
@@ -475,6 +532,7 @@ def sample_halpha_map(map_values: np.ndarray, target: MapTarget) -> dict[str, An
         "excessP75Rayleigh": round(excess75, 6),
         "excessP90Rayleigh": round(excess90, 6),
         "detected": bool(detected),
+        "resolvedForQuantitative": bool(resolved_for_quantitative),
         "resolutionConfidence": resolution_confidence,
         "targetPixelCount": int(target_vals.size),
         "backgroundPixelCount": int(bg_vals.size),
@@ -503,10 +561,16 @@ def build_extended_records(work_dir: Path) -> tuple[list[dict[str, Any]], dict[s
             continue
         stats["sampled"] += 1
         detected = bool(measurement["detected"])
+        resolved = bool(measurement.get("resolvedForQuantitative"))
+        quantitative = detected and resolved
         if detected:
             stats["detected"] += 1
             detected_by_type[target.physical_type] += 1
-        confidence = measurement["resolutionConfidence"] if detected else "low"
+        if detected and not resolved:
+            stats["unresolvedDetected"] += 1
+        if quantitative:
+            stats["quantitative"] += 1
+        confidence = measurement["resolutionConfidence"] if quantitative else "low"
         records.append({
             "id": f"finkbeiner:{target.source_key}:{idx}",
             "aliases": target.aliases,
@@ -514,8 +578,12 @@ def build_extended_records(work_dir: Path) -> tuple[list[dict[str, Any]], dict[s
             "decDeg": round(target.dec_deg, 8),
             "physicalType": target.physical_type,
             "band": "Halpha",
-            "signalModel": "line-surface-brightness" if detected else "line-map-nondetection",
-            "quantitative": detected,
+            "signalModel": (
+                "line-surface-brightness" if quantitative
+                else "line-map-unresolved" if detected and not resolved
+                else "line-map-nondetection"
+            ),
+            "quantitative": quantitative,
             "confidence": confidence,
             "geometry": {
                 "majorAxisArcmin": round(target.major_arcmin, 5),
@@ -653,8 +721,11 @@ def build_pn_records() -> tuple[list[dict[str, Any]], dict[str, Any]]:
         name = str(r.get("Name") or "").strip()
         simbad = str(r.get("SimbadID") or "").strip()
         aliases: list[str] = []
-        for alias in ([f"PNG {png}", f"PN G{png}"] if png else []) + [name, simbad]:
-            if alias and normalize_alias(alias) not in {normalize_alias(x) for x in aliases}:
+        pn_alias_candidates = ([f"PNG {png}", f"PN G{png}"] if png else [])
+        for alias in pn_alias_candidates + [name, simbad]:
+            if not alias or unsafe_pn_name_alias(alias):
+                continue
+            if normalize_alias(alias) not in {normalize_alias(x) for x in aliases}:
                 aliases.append(alias)
 
         if status == "T":
@@ -754,7 +825,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
     all_records: list[dict[str, Any]] = []
-    stats: dict[str, Any] = {"generatedAt": utc_now(), "builderVersion": 1}
+    stats: dict[str, Any] = {"generatedAt": utc_now(), "builderVersion": 2}
 
     with tempfile.TemporaryDirectory(prefix="astroplanner-signal-") as tmp:
         work_dir = Path(tmp)
