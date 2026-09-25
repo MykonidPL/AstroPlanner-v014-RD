@@ -1,5 +1,5 @@
-/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.5.
- * Stage 4B.4i: add broadband galaxy surface-brightness calibration to signalTimeFactor.
+/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.6.
+ * Stage 4B.5u: add reflection-nebula brightness metadata parser; signalTimeFactor unchanged.
  * Score/recommendation integration is intentionally NOT part of this substage.
  */
 (function(global){
@@ -62,6 +62,21 @@
   const strip=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ł/g,'l').replace(/Ł/g,'L').toLowerCase();
   const compact=value=>strip(value).replace(/[^a-z0-9]+/g,'');
   const finite=(...values)=>{for(const value of values){if(value==null||typeof value==='boolean'||(typeof value==='string'&&!value.trim()))continue;const n=Number(value);if(Number.isFinite(n))return n;}return null;};
+
+  const REFLECTION_BRIGHTNESS_CLASSES=Object.freeze({
+    VBR:'very-bright',VB:'very-bright',BR:'bright',M:'moderate',F:'faint',VF:'very-faint'
+  });
+  function reflectionBrightnessFromMorphology(value){
+    const morphologyClass=String(value??'').trim()||null;
+    if(!morphologyClass)return Object.freeze({morphologyClass:null,code:null,brightnessClass:null,confidence:null,uncertain:false});
+    const normalized=morphologyClass.toUpperCase().replace(/\s+/g,' ').trim();
+    const match=normalized.match(/(?:^|,)\s*(VBR|VB|BR|M:|MF|VF|M|F|B|:)\s*\.?\s*$/);
+    const code=match?match[1]:null;
+    if(!code)return Object.freeze({morphologyClass,code:null,brightnessClass:null,confidence:'low',uncertain:false});
+    if(code==='M:')return Object.freeze({morphologyClass,code,brightnessClass:'moderate',confidence:'medium',uncertain:true});
+    const brightnessClass=REFLECTION_BRIGHTNESS_CLASSES[code]||null;
+    return Object.freeze({morphologyClass,code,brightnessClass,confidence:brightnessClass?'high':'low',uncertain:code===':'});
+  }
 
   function galacticToken(lon,sign,lat,prefix='g'){
     const lo=Number(lon),la=Number(lat);if(!Number.isFinite(lo)||!Number.isFinite(la))return null;
@@ -175,6 +190,8 @@
     const catalogMagnitude=finite(obj.mag,obj.magnitude,obj.vMag,obj.vmag,props.magnitude,props.vMagnitude,props.bMagnitude,props.mag,props.vMag);
     const magnitudeBand=String(obj.magBand||obj.magnitudeBand||props.magnitudeBand||'').trim()||null;
     const catalogSurfaceRaw=finite(obj.surfaceBrightness,props.surfaceBrightness,props.surfaceBrightnessMagArcsec2);
+    const morphologyClass=String(obj.morphologyClass||props.morphologyClass||'').trim()||null;
+    const reflectionBrightness=base.physicalType==='reflection-nebula'?reflectionBrightnessFromMorphology(morphologyClass):null;
     const componentMismatch=photometryAppliesTo==='stellar-component';
     const magnitude=componentMismatch?null:catalogMagnitude;
     const catalogSurface=componentMismatch?null:catalogSurfaceRaw;
@@ -190,7 +207,7 @@
     else if(useSurface&&Number.isFinite(derivedSurface)){model='surface-brightness';confidence='medium';}
     else if(base.signalKind==='line'){model='line-flux-missing';confidence='low';}
     else if(Number.isFinite(magnitude)){model='integrated-magnitude';confidence='medium';}
-    return Object.freeze({model,confidence,photometryAppliesTo,integratedMagnitude:magnitude,catalogIntegratedMagnitude:catalogMagnitude,magnitudeBand,majorArcmin:axes.majorArcmin,minorArcmin:axes.minorArcmin,surfaceBrightnessMagArcsec2:Number.isFinite(catalogSurface)?catalogSurface:(Number.isFinite(derivedSurface)?derivedSurface:null),catalogSurfaceBrightnessMagArcsec2:catalogSurfaceRaw,surfaceBrightnessSource:Number.isFinite(catalogSurface)?'catalog':(Number.isFinite(derivedSurface)?'derived-from-magnitude-and-size':null),opacityClass,extinctionAv,absorptionContrast});
+    return Object.freeze({model,confidence,photometryAppliesTo,integratedMagnitude:magnitude,catalogIntegratedMagnitude:catalogMagnitude,magnitudeBand,majorArcmin:axes.majorArcmin,minorArcmin:axes.minorArcmin,surfaceBrightnessMagArcsec2:Number.isFinite(catalogSurface)?catalogSurface:(Number.isFinite(derivedSurface)?derivedSurface:null),catalogSurfaceBrightnessMagArcsec2:catalogSurfaceRaw,surfaceBrightnessSource:Number.isFinite(catalogSurface)?'catalog':(Number.isFinite(derivedSurface)?'derived-from-magnitude-and-size':null),morphologyClass,reflectionBrightnessCode:reflectionBrightness?.code||null,reflectionBrightnessClass:reflectionBrightness?.brightnessClass||null,reflectionBrightnessConfidence:reflectionBrightness?.confidence||null,reflectionBrightnessUncertain:reflectionBrightness?.uncertain===true,reflectionBrightnessSource:reflectionBrightness?.code?'stellarium-morphology':null,opacityClass,extinctionAv,absorptionContrast});
   }
 
   function signalFromDatasetRecord(record={}){
@@ -224,7 +241,7 @@
   }
 
   const metadataCache=new Map();
-  function stableCacheKey(obj){const ids=identityTokens(obj).slice(0,6).join('|');return[ids,String(obj?.typeCode||obj?.objectType||''),String(obj?.type||obj?.typeName||''),String(obj?.catalog||obj?.catalogSource||''),(obj?.groups||obj?.catalogueGroups||[]).join(','),String(obj?.mag??''),String(obj?.majorAxisArcmin??obj?.major??''),String(obj?.minorAxisArcmin??obj?.minor??'')].join('::');}
+  function stableCacheKey(obj){const ids=identityTokens(obj).slice(0,6).join('|');return[ids,String(obj?.typeCode||obj?.objectType||''),String(obj?.type||obj?.typeName||''),String(obj?.catalog||obj?.catalogSource||''),(obj?.groups||obj?.catalogueGroups||[]).join(','),String(obj?.mag??''),String(obj?.majorAxisArcmin??obj?.major??''),String(obj?.minorAxisArcmin??obj?.minor??''),String(obj?.morphologyClass??obj?.properties?.morphologyClass??'')].join('::');}
   function metadataForObject(obj={}){
     const key=stableCacheKey(obj);if(metadataCache.has(key))return metadataCache.get(key);
     const override=curatedFor(obj),typeCode=String(obj.typeCode||obj.objectType||'').trim(),codeMeta=TYPE_META[typeCode]||null,groupMeta=metaFromGroups(obj.groups||obj.catalogueGroups,obj.catalog||obj.catalogSource),textMeta=metaFromText(obj.type||obj.typeName||obj.typeLabel);
