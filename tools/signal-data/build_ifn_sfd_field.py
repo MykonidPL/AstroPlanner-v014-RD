@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AstroPlanner R&D — Stage 4B.7m IFN SFD -> HEALPix v1 smoke builder (Cartesian aperture path).
+"""AstroPlanner R&D — Stage 4B.7p IFN SFD -> HEALPix v1 smoke builder + canary binary writer.
 
 Purpose of this microstage:
 - validate the frozen output grid contract: HEALPix NSIDE=256, RING, ICRS;
@@ -7,6 +7,7 @@ Purpose of this microstage:
 - prove the path on a small control/sample set only.
 
 This tool intentionally DOES NOT generate the all-sky runtime asset yet.
+The binary writer is canary-only and is limited by the explicit <=64-pixel smoke list.
 It never changes AstroPlanner runtime, Score, UI, or recommendations.
 
 Input contract:
@@ -37,7 +38,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-BUILDER_VERSION = "4B.7m-cartesian-1"
+BUILDER_VERSION = "4B.7p-canary-writer-1"
 MODEL = "ifn-sfd-i100"
 NSIDE = 256
 NPIX = 12 * NSIDE * NSIDE
@@ -544,7 +545,7 @@ def parse_pixel_list(spec: str) -> list[int]:
     if not out:
         raise argparse.ArgumentTypeError("pixel list is empty")
     if len(out) > 64:
-        raise argparse.ArgumentTypeError("Stage 4B.7j smoke builder allows at most 64 pixels")
+        raise argparse.ArgumentTypeError("Stage 4B.7p smoke builder allows at most 64 pixels")
     return out
 
 
@@ -562,19 +563,127 @@ def build_pixel_record(maps: dict[int, SfdMap], pix: int) -> dict[str, Any]:
     }
 
 
+
+def write_canary_asset(
+    pixel_records: list[dict[str, Any]],
+    prefix: Path,
+    maps: dict[int, SfdMap],
+) -> tuple[Path, Path, dict[str, Any]]:
+    """Write a <=64-record binary/manifest canary; never a full-sky runtime asset."""
+    if not pixel_records:
+        raise RuntimeError("canary binary writer requires explicit --pixels records")
+    if len(pixel_records) > 64:
+        raise RuntimeError("canary binary writer is limited to 64 records")
+
+    rows = np.empty((len(pixel_records), 2), dtype=np.float64)
+    pixel_indices: list[int] = []
+    for i, rec in enumerate(pixel_records):
+        mean = float(rec["meanI100"])
+        std = float(rec["stdI100"])
+        pix = int(rec["pixel"])
+        if not (math.isfinite(mean) and math.isfinite(std)):
+            raise RuntimeError(f"non-finite canary value at HEALPix pixel {pix}")
+        if std < 0.0:
+            raise RuntimeError(f"negative std at HEALPix pixel {pix}: {std}")
+        rows[i, 0] = mean
+        rows[i, 1] = std
+        pixel_indices.append(pix)
+
+    # Frozen binary record contract: little-endian Float32, interleaved mean,std.
+    packed = np.asarray(rows, dtype=np.dtype("<f4"))
+    binary_path = prefix.with_suffix(".bin")
+    manifest_path = prefix.with_suffix(".json")
+    binary_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    binary_path.write_bytes(packed.tobytes(order="C"))
+
+    expected_bytes = len(pixel_records) * 2 * np.dtype("<f4").itemsize
+    actual_bytes = binary_path.stat().st_size
+    if actual_bytes != expected_bytes:
+        raise RuntimeError(
+            f"binary byte length mismatch: expected {expected_bytes}, got {actual_bytes}"
+        )
+
+    decoded = np.fromfile(binary_path, dtype=np.dtype("<f4"))
+    if decoded.size != len(pixel_records) * 2:
+        raise RuntimeError(
+            f"binary Float32 count mismatch: expected {len(pixel_records) * 2}, got {decoded.size}"
+        )
+    decoded = decoded.reshape((-1, 2))
+    if not np.array_equal(decoded, packed):
+        raise RuntimeError("binary round-trip mismatch after little-endian Float32 decode")
+    if not bool(np.all(np.isfinite(decoded))):
+        raise RuntimeError("binary round-trip produced non-finite values")
+
+    manifest = {
+        "schemaVersion": 1,
+        "stage": "4B.7p",
+        "kind": "canary-binary-format-not-runtime-asset",
+        "generatedAt": utc_now(),
+        "builderVersion": BUILDER_VERSION,
+        "model": MODEL,
+        "source": "SFD-100um-I100",
+        "unit": EXPECTED_BUNIT,
+        "fullSky": False,
+        "grid": {
+            "type": "HEALPix",
+            "nside": NSIDE,
+            "npix": NPIX,
+            "ordering": ORDERING,
+            "frame": FRAME,
+        },
+        "aperture": {
+            "radiusDeg": APERTURE_RADIUS_DEG,
+            "statisticPrimary": "mean(I100)",
+            "statisticSecondary": "std(I100)",
+            "nativePixelSelection": "pixel-center within spherical aperture",
+            "stdDof": 0,
+            "zeroPointSubtraction": "none",
+        },
+        "binary": {
+            "filename": binary_path.name,
+            "dtype": "Float32",
+            "endianness": "little",
+            "layout": "interleaved meanI100,stdI100",
+            "fields": ["meanI100", "stdI100"],
+            "bytesPerRecord": 8,
+            "recordCount": len(pixel_records),
+            "byteLength": actual_bytes,
+            "sha256": sha256_file(binary_path),
+        },
+        "pixelIndices": pixel_indices,
+        "sources": source_manifest(maps),
+        "validation": {
+            "allFinite": True,
+            "roundTripExactFloat32": True,
+            "expectedByteLength": expected_bytes,
+            "actualByteLength": actual_bytes,
+        },
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return binary_path, manifest_path, manifest
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Stage 4B.7m SFD I100 -> HEALPix smoke builder")
+    parser = argparse.ArgumentParser(description="Stage 4B.7p SFD I100 -> HEALPix smoke builder + canary writer")
     parser.add_argument("--ngp", type=Path, help="path to SFD_i100_4096_ngp.fits")
     parser.add_argument("--sgp", type=Path, help="path to SFD_i100_4096_sgp.fits")
     parser.add_argument("--control", action="append", default=[], metavar="NAME,L,B", help="measure a control field and the containing NSIDE=256 RING pixel")
     parser.add_argument("--pixels", type=parse_pixel_list, help="comma-separated explicit HEALPix RING pixels; max 64")
     parser.add_argument("--output", type=Path, default=Path("ifn-sfd-field-smoke-v1.json"))
+    parser.add_argument(
+        "--canary-asset-prefix",
+        type=Path,
+        help="write <=64 explicit --pixels as PREFIX.bin + PREFIX.json; never full-sky",
+    )
     args = parser.parse_args()
 
     if args.ngp is None and args.sgp is None:
         parser.error("at least one of --ngp/--sgp is required")
     if not args.control and not args.pixels:
-        parser.error("Stage 4B.7m requires --control and/or --pixels; full-sky generation is intentionally not enabled")
+        parser.error("Stage 4B.7p requires --control and/or --pixels; full-sky generation is intentionally not enabled")
 
     maps: dict[int, SfdMap] = {}
     if args.ngp is not None:
@@ -588,9 +697,25 @@ def main() -> int:
     pixels = args.pixels or []
     pixel_records = [build_pixel_record(maps, p) for p in pixels]
 
+    if args.canary_asset_prefix is not None and not pixels:
+        parser.error("--canary-asset-prefix requires explicit --pixels")
+
+    canary_result = None
+    if args.canary_asset_prefix is not None:
+        binary_path, manifest_path, manifest = write_canary_asset(
+            pixel_records, args.canary_asset_prefix, maps
+        )
+        canary_result = {
+            "binary": str(binary_path),
+            "manifest": str(manifest_path),
+            "records": manifest["binary"]["recordCount"],
+            "bytes": manifest["binary"]["byteLength"],
+            "sha256": manifest["binary"]["sha256"],
+        }
+
     payload = {
         "schemaVersion": 1,
-        "stage": "4B.7m",
+        "stage": "4B.7p",
         "kind": "smoke-validation-not-runtime-asset",
         "generatedAt": utc_now(),
         "builderVersion": BUILDER_VERSION,
@@ -616,16 +741,18 @@ def main() -> int:
         "healpixSelfTest": hp_test,
         "controls": control_records,
         "pixels": pixel_records,
+        "canaryAsset": canary_result,
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
-        "stage": "4B.7m",
+        "stage": "4B.7p",
         "controls": len(control_records),
         "pixels": len(pixel_records),
         "healpixRoundTripFailures": hp_test["roundTripFailures"],
         "output": str(args.output),
+        "canaryAsset": canary_result,
     }, ensure_ascii=False))
     return 0
 
