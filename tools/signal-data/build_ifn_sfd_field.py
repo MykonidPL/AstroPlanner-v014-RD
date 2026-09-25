@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AstroPlanner R&D — Stage 4B.7j minimal IFN SFD -> HEALPix v1 builder.
+"""AstroPlanner R&D — Stage 4B.7m IFN SFD -> HEALPix v1 smoke builder (Cartesian aperture path).
 
 Purpose of this microstage:
 - validate the frozen output grid contract: HEALPix NSIDE=256, RING, ICRS;
@@ -37,7 +37,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-BUILDER_VERSION = "4B.7j-smoke-1"
+BUILDER_VERSION = "4B.7m-cartesian-1"
 MODEL = "ifn-sfd-i100"
 NSIDE = 256
 NPIX = 12 * NSIDE * NSIDE
@@ -236,14 +236,6 @@ class SfdMap:
         return raw * self.bscale + self.bzero
 
 
-def angular_separation_rad(l1: np.ndarray, b1: np.ndarray, l2: float, b2: float) -> np.ndarray:
-    # Stable haversine, vectorised.
-    dl = np.arctan2(np.sin(l1 - l2), np.cos(l1 - l2))
-    db = b1 - b2
-    a = np.sin(db / 2.0) ** 2 + np.cos(b1) * math.cos(b2) * np.sin(dl / 2.0) ** 2
-    return 2.0 * np.arcsin(np.sqrt(np.clip(a, 0.0, 1.0)))
-
-
 def measure_one_map(m: SfdMap, lon_deg: float, lat_deg: float, radius_deg: float) -> np.ndarray:
     # Skip hemispheres that cannot intersect the requested aperture.
     if m.nsgp > 0 and lat_deg < -radius_deg:
@@ -264,25 +256,44 @@ def measure_one_map(m: SfdMap, lon_deg: float, lat_deg: float, radius_deg: float
     if x1 < x0 or y1 < y0:
         return np.empty(0, dtype=np.float64)
 
+    # Exact spherical aperture test directly in Cartesian space from the
+    # SFD Lambert equal-area coordinates.  This avoids inverse trig +
+    # haversine for every native pixel while preserving the same pixel-centre
+    # inclusion contract.
     xs = np.arange(x0, x1 + 1, dtype=np.float64)
     ys = np.arange(y0, y1 + 1, dtype=np.float64)
-    xx, yy = np.meshgrid(xs, ys)
-    l, b, valid_proj = m.inverse_pixels(xx, yy)
-    sep = angular_separation_rad(l, b, math.radians(lon_deg % 360.0), math.radians(lat_deg))
-    inside = valid_proj & (sep <= math.radians(radius_deg) + 1e-14)
+    dx = (xs - m.crpix1_zero) / m.scale
+    dy = (ys - m.crpix2_zero) / m.scale
+    rho2 = dy[:, None] * dy[:, None] + dx[None, :] * dx[None, :]
+    valid_proj = rho2 <= (1.0 + 1e-12)
+
+    q = np.sqrt(np.clip(2.0 - rho2, 0.0, None))
+    vx = dx[None, :] * q
+    vy = (-m.nsgp * dy[:, None]) * q
+    vz = m.nsgp * (1.0 - rho2)
+
+    l0 = math.radians(lon_deg % 360.0)
+    b0 = math.radians(lat_deg)
+    cb0 = math.cos(b0)
+    c0x = cb0 * math.cos(l0)
+    c0y = cb0 * math.sin(l0)
+    c0z = math.sin(b0)
+    dot = vx * c0x + vy * c0y + vz * c0z
+    inside = valid_proj & (dot >= math.cos(math.radians(radius_deg)) - 2e-15)
 
     if m.nsgp > 0:
-        inside &= b >= -1e-14
+        inside &= vz >= -1e-14
     else:
         # Strict south at the shared b=0 boundary prevents double counting.
-        inside &= b < -1e-14
+        inside &= vz < -1e-14
 
     if not np.any(inside):
         return np.empty(0, dtype=np.float64)
 
-    yi = yy[inside].astype(np.intp)
-    xi = xx[inside].astype(np.intp)
-    vals = m.values(yi, xi)
+    iy, ix = np.nonzero(inside)
+    yy = (iy + y0).astype(np.intp)
+    xx = (ix + x0).astype(np.intp)
+    vals = m.values(yy, xx)
     return vals[np.isfinite(vals)]
 
 
@@ -552,7 +563,7 @@ def build_pixel_record(maps: dict[int, SfdMap], pix: int) -> dict[str, Any]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Stage 4B.7j minimal SFD I100 -> HEALPix smoke builder")
+    parser = argparse.ArgumentParser(description="Stage 4B.7m SFD I100 -> HEALPix smoke builder")
     parser.add_argument("--ngp", type=Path, help="path to SFD_i100_4096_ngp.fits")
     parser.add_argument("--sgp", type=Path, help="path to SFD_i100_4096_sgp.fits")
     parser.add_argument("--control", action="append", default=[], metavar="NAME,L,B", help="measure a control field and the containing NSIDE=256 RING pixel")
@@ -563,7 +574,7 @@ def main() -> int:
     if args.ngp is None and args.sgp is None:
         parser.error("at least one of --ngp/--sgp is required")
     if not args.control and not args.pixels:
-        parser.error("Stage 4B.7j requires --control and/or --pixels; full-sky generation is intentionally not enabled")
+        parser.error("Stage 4B.7m requires --control and/or --pixels; full-sky generation is intentionally not enabled")
 
     maps: dict[int, SfdMap] = {}
     if args.ngp is not None:
@@ -579,7 +590,7 @@ def main() -> int:
 
     payload = {
         "schemaVersion": 1,
-        "stage": "4B.7j",
+        "stage": "4B.7m",
         "kind": "smoke-validation-not-runtime-asset",
         "generatedAt": utc_now(),
         "builderVersion": BUILDER_VERSION,
@@ -610,7 +621,7 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
-        "stage": "4B.7j",
+        "stage": "4B.7m",
         "controls": len(control_records),
         "pixels": len(pixel_records),
         "healpixRoundTripFailures": hp_test["roundTripFailures"],
