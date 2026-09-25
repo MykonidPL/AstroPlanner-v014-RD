@@ -1,5 +1,5 @@
-/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.3.
- * Stage 4B.3a: quantitative H-alpha Rayleigh -> signalTimeFactor foundation.
+/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.4.
+ * Stage 4B.3g: separate H-alpha signalTimeFactor calibration for planetary nebulae.
  * Score/recommendation integration is intentionally NOT part of this substage.
  */
 (function(global){
@@ -50,8 +50,10 @@
   const SIGNAL_SUPPLEMENT_URL='https://raw.githubusercontent.com/acocalypso/celestia_atlas/ef52c7ea920191d45fe0da4711dd3b1cc9220c18/data/stellarium-dso-supplement.json';
   const LOCAL_SIGNAL_DATA_URL='./target-signal-data.json';
   const SIGNAL_TIME_CONFIG=Object.freeze({
-    model:'halpha-rayleigh-v1',
+    model:'halpha-rayleigh-v2',
     referenceRayleigh:15,
+    exponent:0.50,
+    planetaryNebula:Object.freeze({referenceRayleigh:1163.5,exponent:0.25}),
     minFactor:0.25,
     maxFactor:4.0,
     confidenceWeights:Object.freeze({high:1.00,medium:0.65,low:0.35})
@@ -291,7 +293,10 @@
     const s=meta?.signal||{};
     const quantitativeHalpha=(s.model==='halpha-surface-brightness'||s.model==='halpha-pn')&&s.quantitative===true&&Number.isFinite(s.halphaRayleigh)&&s.halphaRayleigh>0;
     if(!quantitativeHalpha)return 1.0;
-    const raw=Math.min(SIGNAL_TIME_CONFIG.maxFactor,Math.max(SIGNAL_TIME_CONFIG.minFactor,Math.sqrt(SIGNAL_TIME_CONFIG.referenceRayleigh/s.halphaRayleigh)));
+    const isPlanetaryNebula=meta?.physicalType==='planetary-nebula'||s.model==='halpha-pn';
+    const calibration=isPlanetaryNebula?SIGNAL_TIME_CONFIG.planetaryNebula:SIGNAL_TIME_CONFIG;
+    const rawUnclamped=Math.pow(calibration.referenceRayleigh/s.halphaRayleigh,calibration.exponent);
+    const raw=Math.min(SIGNAL_TIME_CONFIG.maxFactor,Math.max(SIGNAL_TIME_CONFIG.minFactor,rawUnclamped));
     const confidenceWeight=SIGNAL_TIME_CONFIG.confidenceWeights[s.confidence]??SIGNAL_TIME_CONFIG.confidenceWeights.low;
     return Math.pow(raw,confidenceWeight);
   }
