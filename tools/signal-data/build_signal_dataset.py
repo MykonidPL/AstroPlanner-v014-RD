@@ -247,8 +247,12 @@ def geometry_from_record(r: dict[str, Any], source_key: str) -> tuple[float | No
     def get_num(keys: Iterable[str]) -> float | None:
         return coerce_catalog_number(nested_value(r, keys))
 
-    major = get_num(("majorAxisArcmin", "majAxArcmin", "major_axis_arcmin", "sizeArcmin", "diameterArcmin", "angularSizeArcmin", "MajAx", "majAx"))
-    minor = get_num(("minorAxisArcmin", "minAxArcmin", "minor_axis_arcmin", "MinAx", "minAx"))
+    # Runtime catalogue schemas currently used by AstroPlanner:
+    # - OpenNGC compact rows expose root-level `major` / `minor` (arcmin),
+    # - Stellarium supplement exposes `shape.majorArcmin` / `shape.minorArcmin`.
+    # Keep the broader aliases for future/imported catalogue variants.
+    major = get_num(("majorAxisArcmin", "majorArcmin", "major", "majAxArcmin", "major_axis_arcmin", "sizeArcmin", "diameterArcmin", "angularSizeArcmin", "MajAx", "majAx"))
+    minor = get_num(("minorAxisArcmin", "minorArcmin", "minor", "minAxArcmin", "minor_axis_arcmin", "MinAx", "minAx"))
     major_deg = get_num(("majorAxisDeg", "major_axis_deg", "sizeMajorDeg", "diameterDeg"))
     minor_deg = get_num(("minorAxisDeg", "minor_axis_deg", "sizeMinorDeg"))
     if major is None and major_deg is not None:
@@ -305,7 +309,7 @@ class MapTarget:
     physical_type: str
 
 
-def collect_map_targets() -> tuple[list[MapTarget], dict[str, int]]:
+def collect_map_targets() -> tuple[list[MapTarget], dict[str, int], dict[str, Any]]:
     rows_by_source: dict[str, list[dict[str, Any]]] = {}
     source_counts: dict[str, int] = {}
     for key, url in CATALOG_URLS.items():
@@ -313,23 +317,45 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int]]:
         rows_by_source[key] = rows
         source_counts[key] = len(rows)
 
+    diagnostics: dict[str, Any] = {
+        "classifiedByType": {},
+        "acceptedBeforeDedupByType": {},
+        "rejectedBadCoordsByType": {},
+        "rejectedMissingGeometryByType": {},
+        "bySource": {},
+    }
+    classified_by_type = Counter()
+    accepted_by_type = Counter()
+    bad_coords_by_type = Counter()
+    missing_geometry_by_type = Counter()
+
     candidates: list[MapTarget] = []
     for source_key, rows in rows_by_source.items():
+        src = Counter()
         for r in rows:
             physical = classify_line_target(r)
             if not physical:
                 continue
+            src["classified"] += 1
+            classified_by_type[physical] += 1
             ra = finite_number(r.get("raDeg", r.get("ra_deg", r.get("RAdeg"))))
             dec = finite_number(r.get("decDeg", r.get("dec_deg", r.get("DEdeg"))))
             if ra is None or dec is None or abs(dec) > 90:
+                src["rejectedBadCoords"] += 1
+                bad_coords_by_type[physical] += 1
                 continue
             major, minor = geometry_from_record(r, source_key)
             if major is None or minor is None:
+                src["rejectedMissingGeometry"] += 1
+                missing_geometry_by_type[physical] += 1
                 continue
             aliases = aliases_from_record(r)
             if not aliases:
                 aliases = [str(r.get("uid") or f"{source_key}:{ra:.5f}:{dec:.5f}")]
             candidates.append(MapTarget(source_key, aliases, ra, dec, major, minor, physical))
+            src["acceptedBeforeDedup"] += 1
+            accepted_by_type[physical] += 1
+        diagnostics["bySource"][source_key] = dict(src)
 
     # Cross-catalog deduplication: exact normalized alias + nearby coordinates.
     out: list[MapTarget] = []
@@ -368,8 +394,15 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int]]:
             if item.major_arcmin * item.minor_arcmin > old.major_arcmin * old.minor_arcmin:
                 old.major_arcmin, old.minor_arcmin = item.major_arcmin, item.minor_arcmin
             old.aliases = merged_aliases
-    return out, source_counts
 
+    diagnostics["classifiedByType"] = dict(sorted(classified_by_type.items()))
+    diagnostics["acceptedBeforeDedupByType"] = dict(sorted(accepted_by_type.items()))
+    diagnostics["rejectedBadCoordsByType"] = dict(sorted(bad_coords_by_type.items()))
+    diagnostics["rejectedMissingGeometryByType"] = dict(sorted(missing_geometry_by_type.items()))
+    diagnostics["classified"] = sum(classified_by_type.values())
+    diagnostics["acceptedBeforeDedup"] = len(candidates)
+    diagnostics["deduplicatedCandidates"] = len(out)
+    return out, source_counts, diagnostics
 
 def download_to_file(url: str, path: Path, max_bytes: int) -> None:
     data = fetch_bytes(url, max_bytes=max_bytes)
@@ -449,7 +482,7 @@ def sample_halpha_map(map_values: np.ndarray, target: MapTarget) -> dict[str, An
 
 
 def build_extended_records(work_dir: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    targets, source_counts = collect_map_targets()
+    targets, source_counts, target_selection = collect_map_targets()
     map_path = work_dir / "lambda_halpha_fwhm06_0512.fits"
     download_to_file(HALPHA_MAP_URL, map_path, MAX_MAP_BYTES)
     map_values = hp.read_map(str(map_path), field=0, nest=True, dtype=np.float64, memmap=True)
@@ -493,6 +526,7 @@ def build_extended_records(work_dir: Path) -> tuple[list[dict[str, Any]], dict[s
         })
     return records, {
         "catalogInputRows": source_counts,
+        "targetSelection": target_selection,
         "candidatesByType": dict(sorted(by_type.items())),
         "detectedByType": dict(sorted(detected_by_type.items())),
         **dict(stats),
