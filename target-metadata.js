@@ -1,5 +1,5 @@
-/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.7.
- * Stage 4B.5w-a: route reflection-nebula vdB brightness through signal supplement plumbing; signalTimeFactor unchanged.
+/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.8.
+ * Stage 4B.5w-b: apply vdB reflection-brightness classes in signalTimeFactor; weak SB fallback remains disabled.
  * Score/recommendation integration is intentionally NOT part of this substage.
  */
 (function(global){
@@ -55,6 +55,7 @@
     exponent:0.50,
     planetaryNebula:Object.freeze({referenceRayleigh:1163.5,exponent:0.25}),
     broadbandGalaxy:Object.freeze({model:'surface-brightness-mag-arcsec2-v1',referenceMagArcsec2:23.1,exponent:0.40}),
+    reflectionNebula:Object.freeze({model:'vdb-brightness-v1',q:1.25,classIndex:Object.freeze({'very-bright':-2,bright:-1,moderate:0,faint:1,'very-faint':2})}),
     minFactor:0.25,
     maxFactor:4.0,
     confidenceWeights:Object.freeze({high:1.00,medium:0.65,low:0.35})
@@ -311,6 +312,9 @@
   function signalTimeFactor(meta){
     const s=meta?.signal||{};
     const confidenceWeight=SIGNAL_TIME_CONFIG.confidenceWeights[s.confidence]??SIGNAL_TIME_CONFIG.confidenceWeights.low;
+    const reflectionClass=meta?.physicalType==='reflection-nebula'?s.reflectionBrightnessClass:null;
+    const reflectionIndex=SIGNAL_TIME_CONFIG.reflectionNebula.classIndex[reflectionClass];
+    if(Number.isFinite(reflectionIndex))return Math.pow(SIGNAL_TIME_CONFIG.reflectionNebula.q,reflectionIndex);
     const galaxySurface=['galaxy','galaxy-pair','galaxy-triplet'].includes(meta?.physicalType)&&s.model==='surface-brightness'&&Number.isFinite(s.surfaceBrightnessMagArcsec2);
     if(galaxySurface){
       const calibration=SIGNAL_TIME_CONFIG.broadbandGalaxy;
