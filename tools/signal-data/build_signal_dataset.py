@@ -46,6 +46,8 @@ CATALOG_URLS = {
 HALPHA_MAP_URL = "https://lambda.gsfc.nasa.gov/data/foregrounds/halpha/lambda_halpha_fwhm06_0512.fits"
 HASH_TAP_URL = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
 HASH_TABLE = 'V/163/pnmain'
+GREEN_TAP_URL = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
+GREEN_TABLE = 'VII/297/snrs'
 HASH_FALLBACK_URLS = [
     "https://cdsarc.cds.unistra.fr/ftp/cats/V/163/pnmain.dat",
     "https://cdsarc.cds.unistra.fr/ftp/V/163/pnmain.dat",
@@ -352,6 +354,110 @@ def classify_line_target(r: dict[str, Any]) -> str | None:
     return None
 
 
+
+def parse_catalog_ra_dec(ra_value: Any, dec_value: Any) -> tuple[float | None, float | None]:
+    """Parse VizieR coordinates whether returned as decimal degrees or sexagesimal text."""
+    ra_num = finite_number(ra_value)
+    dec_num = finite_number(dec_value)
+    if ra_num is not None and dec_num is not None:
+        if 0.0 <= ra_num < 360.0 and -90.0 <= dec_num <= 90.0:
+            return ra_num, dec_num
+
+    ra_text = str(ra_value or "").strip()
+    dec_text = str(dec_value or "").strip()
+    if not ra_text or not dec_text:
+        return None, None
+    try:
+        coord = SkyCoord(ra_text, dec_text, unit=(u.hourangle, u.deg), frame="icrs")
+        ra_deg = float(coord.ra.deg)
+        dec_deg = float(coord.dec.deg)
+        if math.isfinite(ra_deg) and math.isfinite(dec_deg) and abs(dec_deg) <= 90:
+            return ra_deg, dec_deg
+    except Exception:
+        return None, None
+    return None, None
+
+
+def split_catalog_names(value: Any) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    return [part.strip() for part in re.split(r"[,;]", text) if part.strip()]
+
+
+def green_snr_targets() -> tuple[list["MapTarget"], dict[str, Any]]:
+    """Load confirmed Galactic SNR identity/position/geometry from Green via VizieR.
+
+    Radio flux/spectral-index fields are intentionally not queried: this source is
+    used only to define SNR apertures for the independent H-alpha map measurement.
+    """
+    columns = ["SNR", "RAJ2000", "DEJ2000", "MajDiam", "MinDiam", "type", "Names"]
+    select_cols = ", ".join(f'"{c}"' for c in columns)
+    query = f'SELECT {select_cols} FROM "{GREEN_TABLE}"'
+    raw = fetch_bytes(
+        GREEN_TAP_URL,
+        max_bytes=2 * 1024 * 1024,
+        params={"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": query},
+    ).decode("utf-8-sig", errors="replace")
+    if "QUERY_STATUS" in raw[:1000] and "ERROR" in raw[:1000]:
+        raise RuntimeError("VizieR TAP returned an error document for Green SNR catalogue")
+    rows = list(csv.DictReader(io.StringIO(raw)))
+    if not rows:
+        raise RuntimeError("VizieR TAP returned zero Green SNR rows")
+
+    targets: list[MapTarget] = []
+    stats = Counter()
+    for row in rows:
+        stats["inputRows"] += 1
+        designation = str(row.get("SNR") or "").strip()
+        ra, dec = parse_catalog_ra_dec(row.get("RAJ2000"), row.get("DEJ2000"))
+        if ra is None or dec is None:
+            stats["rejectedBadCoords"] += 1
+            continue
+        major = finite_number(row.get("MajDiam"))
+        minor = finite_number(row.get("MinDiam"))
+        if major is None or major <= 0:
+            stats["rejectedMissingGeometry"] += 1
+            continue
+        if minor is None or minor <= 0:
+            minor = major
+            stats["assumedCircular"] += 1
+
+        aliases: list[str] = []
+        if designation:
+            gname = designation if designation.upper().startswith("G") else f"G{designation}"
+            aliases.extend([gname, f"SNR {gname}"])
+        aliases.extend(split_catalog_names(row.get("Names")))
+        clean_aliases: list[str] = []
+        seen: set[str] = set()
+        for alias in aliases:
+            key = normalize_alias(alias)
+            if key and key not in seen:
+                seen.add(key)
+                clean_aliases.append(alias)
+        if not clean_aliases:
+            clean_aliases = [f"green:{ra:.5f}:{dec:.5f}"]
+
+        targets.append(
+            MapTarget(
+                source_key="green2025",
+                aliases=clean_aliases,
+                ra_deg=ra,
+                dec_deg=dec,
+                major_arcmin=float(major),
+                minor_arcmin=float(minor),
+                physical_type="supernova-remnant",
+            )
+        )
+        stats["accepted"] += 1
+
+    return targets, {
+        "catalogue": "Green2025-VII297",
+        "table": GREEN_TABLE,
+        **dict(stats),
+    }
+
+
 @dataclass
 class MapTarget:
     source_key: str
@@ -370,6 +476,9 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int], dict[str, An
         rows = find_record_array(fetch_json(url))
         rows_by_source[key] = rows
         source_counts[key] = len(rows)
+
+    green_targets, green_stats = green_snr_targets()
+    source_counts["green2025"] = int(green_stats.get("inputRows", 0))
 
     diagnostics: dict[str, Any] = {
         "classifiedByType": {},
@@ -410,6 +519,16 @@ def collect_map_targets() -> tuple[list[MapTarget], dict[str, int], dict[str, An
             src["acceptedBeforeDedup"] += 1
             accepted_by_type[physical] += 1
         diagnostics["bySource"][source_key] = dict(src)
+
+    green_src = Counter()
+    for item in green_targets:
+        candidates.append(item)
+        classified_by_type["supernova-remnant"] += 1
+        accepted_by_type["supernova-remnant"] += 1
+        green_src["classified"] += 1
+        green_src["acceptedBeforeDedup"] += 1
+    diagnostics["bySource"]["green2025"] = dict(green_src)
+    diagnostics["greenCatalogue"] = green_stats
 
     # Cross-catalog deduplication. Strong catalogue identifiers are authoritative
     # even when two catalogues choose noticeably different centres/footprints.
@@ -622,6 +741,10 @@ def build_extended_records(work_dir: Path) -> tuple[list[dict[str, Any]], dict[s
             },
             "measurement": measurement,
             "source": "Finkbeiner2003-Halpha-v1.1",
+            "targetDefinitionSource": (
+                "Green2025-VII297" if target.source_key == "green2025"
+                else f"celestia_atlas:{target.source_key}"
+            ),
         })
     return records, {
         "catalogInputRows": source_counts,
@@ -856,7 +979,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
     all_records: list[dict[str, Any]] = []
-    stats: dict[str, Any] = {"generatedAt": utc_now(), "builderVersion": 4}
+    stats: dict[str, Any] = {"generatedAt": utc_now(), "builderVersion": 5}
 
     with tempfile.TemporaryDirectory(prefix="astroplanner-signal-") as tmp:
         work_dir = Path(tmp)
@@ -907,6 +1030,11 @@ def main() -> int:
                 "id": "HASH-V163",
                 "url": "https://cdsarc.cds.unistra.fr/viz-bin/ReadMe/V/163?format=html&tex=true",
                 "description": "HASH planetary-nebula catalogue via VizieR V/163; Galactic T/L/P objects with published H-alpha flux when available.",
+            },
+            {
+                "id": "Green2025-VII297",
+                "url": "https://vizier.cds.unistra.fr/viz-bin/VizieR?-source=VII%2F297",
+                "description": "D. A. Green Galactic SNR catalogue (2024 October / Green 2025), VizieR VII/297; identity, ICRS position and angular size only. Radio flux is not used as an optical-signal proxy.",
             },
             {
                 "id": "celestia_atlas",
