@@ -1,9 +1,6 @@
-/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.1.
- * Classification is deterministic from the loaded catalogues. Signal metadata is
- * deliberately type-aware: integrated magnitude / mean surface brightness for
- * extended continuum targets, Lynds opacity for dark nebulae, and explicit
- * "unknown" for classes where the current catalogues do not provide a physically
- * comparable line-flux measure.
+/* AstroPlanner v0.14 R&D — photographic + signal metadata v5.3.
+ * Stage 4B.3a: quantitative H-alpha Rayleigh -> signalTimeFactor foundation.
+ * Score/recommendation integration is intentionally NOT part of this substage.
  */
 (function(global){
   'use strict';
@@ -51,10 +48,47 @@
   };
 
   const SIGNAL_SUPPLEMENT_URL='https://raw.githubusercontent.com/acocalypso/celestia_atlas/ef52c7ea920191d45fe0da4711dd3b1cc9220c18/data/stellarium-dso-supplement.json';
+  const LOCAL_SIGNAL_DATA_URL='./target-signal-data.json';
+  const SIGNAL_TIME_CONFIG=Object.freeze({
+    model:'halpha-rayleigh-v1',
+    referenceRayleigh:15,
+    minFactor:0.25,
+    maxFactor:4.0,
+    confidenceWeights:Object.freeze({high:1.00,medium:0.65,low:0.35})
+  });
   const strip=value=>String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ł/g,'l').replace(/Ł/g,'L').toLowerCase();
   const compact=value=>strip(value).replace(/[^a-z0-9]+/g,'');
   const finite=(...values)=>{for(const value of values){if(value==null||typeof value==='boolean'||(typeof value==='string'&&!value.trim()))continue;const n=Number(value);if(Number.isFinite(n))return n;}return null;};
 
+  function galacticToken(lon,sign,lat,prefix='g'){
+    const lo=Number(lon),la=Number(lat);if(!Number.isFinite(lo)||!Number.isFinite(la))return null;
+    return `${prefix}${lo.toFixed(1).padStart(5,'0')}${sign}${la.toFixed(1).padStart(4,'0')}`;
+  }
+  function strongTokenFromText(raw){
+    const s=strip(raw).trim();if(!s)return null;let m;
+    if((m=s.match(/^m\s*0*(\d{1,3})$/)))return'm'+String(Number(m[1]));
+    if((m=s.match(/^ngc\s*0*(\d+)$/)))return'ngc'+String(Number(m[1]));
+    if((m=s.match(/^ic\s*0*(\d+)$/)))return'ic'+String(Number(m[1]));
+    if((m=s.match(/^sh\s*2[-\s]*0*(\d+)$/)))return'sh2'+String(Number(m[1]));
+    if((m=s.match(/^rcw\s*0*(\d+)$/)))return'rcw'+String(Number(m[1]));
+    if((m=s.match(/^lbn\s*0*(\d+)$/)))return'lbn'+String(Number(m[1]));
+    if((m=s.match(/^ldn\s*0*(\d+)$/)))return'ldn'+String(Number(m[1]));
+    if((m=s.match(/^ctb\s*0*(\d+)$/)))return'ctb'+String(Number(m[1]));
+    if((m=s.match(/^g\s*0*(\d+(?:\.\d+)?)\s*([+-])\s*0*(\d+(?:\.\d+)?)$/)))return galacticToken(m[1],m[2],m[3],'g');
+    if((m=s.match(/^(?:png|pn\s*g)\s*0*(\d+(?:\.\d+)?)\s*([+-])\s*0*(\d+(?:\.\d+)?)$/)))return galacticToken(m[1],m[2],m[3],'png');
+    if((m=s.match(/^(?:abell\s*pn|pn\s*a66|a66)[-\s]*0*(\d+)$/)))return'abellpn'+String(Number(m[1]));
+    return null;
+  }
+  function strongIdentityTokens(objOrText){
+    const texts=[];
+    if(typeof objOrText==='string')texts.push(objOrText);
+    else if(objOrText){
+      for(const k of ['name','displayName','catalogId','catalogUid','id','uid'])if(objOrText[k])texts.push(objOrText[k]);
+      if(Array.isArray(objOrText.aliases))texts.push(...objOrText.aliases);
+      if(Array.isArray(objOrText.crossIdentifiers))texts.push(...objOrText.crossIdentifiers);
+    }
+    const out=new Set();for(const raw of texts){const token=strongTokenFromText(raw);if(token)out.add(token);}return[...out];
+  }
   function identityTokens(objOrText){
     const texts=[];
     if(typeof objOrText==='string')texts.push(objOrText);
@@ -68,6 +102,8 @@
       const s=strip(raw);if(!s)continue;
       const pats=[[/\bm\s*0*(\d{1,3})\b/g,'m'],[/\bngc\s*0*(\d+)\b/g,'ngc'],[/\bic\s*0*(\d+)\b/g,'ic'],[/\bsh\s*2[-\s]*0*(\d+)\b/g,'sh2'],[/\bldn\s*0*(\d+)\b/g,'ldn'],[/\blbn\s*0*(\d+)\b/g,'lbn'],[/\bvdb\s*0*(\d+)\b/g,'vdb'],[/\brcw\s*0*(\d+)\b/g,'rcw'],[/\bctb\s*0*(\d+)\b/g,'ctb'],[/\b(?:barnard|b)\s*0*(\d+)\b/g,'b'],[/\b(?:abell\s*pn|pn\s*a66|a66)[-\s]*0*(\d+)\b/g,'abellpn'],[/\b(?:abell|aco)\s*0*(\d+)\b/g,'abell']];
       for(const [re,prefix] of pats){let m;while((m=re.exec(s)))out.add(prefix+String(Number(m[1])));}
+      const gRe=/\bg\s*0*(\d+(?:\.\d+)?)\s*([+-])\s*0*(\d+(?:\.\d+)?)\b/g;let gm;while((gm=gRe.exec(s))){const token=galacticToken(gm[1],gm[2],gm[3],'g');if(token)out.add(token);}
+      const pngRe=/\b(?:png|pn\s*g)\s*0*(\d+(?:\.\d+)?)\s*([+-])\s*0*(\d+(?:\.\d+)?)\b/g;let pm;while((pm=pngRe.exec(s))){const token=galacticToken(pm[1],pm[2],pm[3],'png');if(token)out.add(token);}
       const c=compact(s);if(c)out.add(c);
     }
     return [...out];
@@ -137,14 +173,10 @@
     const magnitudeBand=String(obj.magBand||obj.magnitudeBand||props.magnitudeBand||'').trim()||null;
     const catalogSurfaceRaw=finite(obj.surfaceBrightness,props.surfaceBrightness,props.surfaceBrightnessMagArcsec2);
     const componentMismatch=photometryAppliesTo==='stellar-component';
-    // If the catalogue photometry describes a stellar component (e.g. M45 as an open cluster)
-    // while the photographic target is curated as nebulosity/dust, it must never be used as
-    // the brightness of that nebulosity. Keep the raw value only for auditability.
     const magnitude=componentMismatch?null:catalogMagnitude;
     const catalogSurface=componentMismatch?null:catalogSurfaceRaw;
     const derivedSurface=meanSurfaceBrightness(magnitude,axes.majorArcmin,axes.minorArcmin);
     const opacityRaw=finite(obj.opacityClass,props.opacityClass),opacityClass=opacityRaw!=null&&opacityRaw>=1&&opacityRaw<=6?Math.round(opacityRaw):null;
-    // Feitzinger & Stüwe (1986): A_V = 0.724 * opacity class + 0.5 mag, approximately consistent with Lynds.
     const extinctionAv=opacityClass!=null?0.724*opacityClass+0.5:null;
     const absorptionContrast=extinctionAv!=null?1-Math.pow(10,-0.4*extinctionAv):null;
     const useSurface=['galaxy','galaxy-pair','galaxy-triplet','reflection-nebula'].includes(base.physicalType);
@@ -155,18 +187,37 @@
     else if(useSurface&&Number.isFinite(derivedSurface)){model='surface-brightness';confidence='medium';}
     else if(base.signalKind==='line'){model='line-flux-missing';confidence='low';}
     else if(Number.isFinite(magnitude)){model='integrated-magnitude';confidence='medium';}
+    return Object.freeze({model,confidence,photometryAppliesTo,integratedMagnitude:magnitude,catalogIntegratedMagnitude:catalogMagnitude,magnitudeBand,majorArcmin:axes.majorArcmin,minorArcmin:axes.minorArcmin,surfaceBrightnessMagArcsec2:Number.isFinite(catalogSurface)?catalogSurface:(Number.isFinite(derivedSurface)?derivedSurface:null),catalogSurfaceBrightnessMagArcsec2:catalogSurfaceRaw,surfaceBrightnessSource:Number.isFinite(catalogSurface)?'catalog':(Number.isFinite(derivedSurface)?'derived-from-magnitude-and-size':null),opacityClass,extinctionAv,absorptionContrast});
+  }
+
+  function signalFromDatasetRecord(record={}){
+    const q=record.quantitative===true,m=record.measurement&&typeof record.measurement==='object'?record.measurement:{},geometry=record.geometry&&typeof record.geometry==='object'?record.geometry:{};
+    const isPn=record.physicalType==='planetary-nebula'||m.kind==='integrated-halpha-flux';
+    const rayleigh=isPn?finite(m.meanSurfaceBrightnessRayleigh):(finite(m.excessP75Rayleigh));
+    const quantitative=q&&Number.isFinite(rayleigh)&&rayleigh>0;
+    const model=quantitative?(isPn?'halpha-pn':'halpha-surface-brightness'):'halpha-nonquantitative';
     return Object.freeze({
-      model,confidence,photometryAppliesTo,
-      integratedMagnitude:magnitude,catalogIntegratedMagnitude:catalogMagnitude,magnitudeBand,
-      majorArcmin:axes.majorArcmin,minorArcmin:axes.minorArcmin,
-      surfaceBrightnessMagArcsec2:Number.isFinite(catalogSurface)?catalogSurface:(Number.isFinite(derivedSurface)?derivedSurface:null),
-      catalogSurfaceBrightnessMagArcsec2:catalogSurfaceRaw,
-      surfaceBrightnessSource:Number.isFinite(catalogSurface)?'catalog':(Number.isFinite(derivedSurface)?'derived-from-magnitude-and-size':null),
-      opacityClass,extinctionAv,absorptionContrast
+      model,quantitative,confidence:['high','medium','low'].includes(record.confidence)?record.confidence:'low',halphaRayleigh:quantitative?rayleigh:null,
+      physicalType:record.physicalType||null,band:record.band||'Halpha',datasetSignalModel:record.signalModel||null,datasetRecordId:record.id||null,
+      measurementKind:m.kind||null,source:record.source||null,sourceReference:record.sourceReference||null,targetDefinitionSource:record.targetDefinitionSource||null,
+      majorArcmin:finite(geometry.majorAxisArcmin),minorArcmin:finite(geometry.minorAxisArcmin),
+      excessMedianRayleigh:finite(m.excessMedianRayleigh),excessP75Rayleigh:finite(m.excessP75Rayleigh),excessP90Rayleigh:finite(m.excessP90Rayleigh),
+      targetMedianRayleigh:finite(m.targetMedianRayleigh),targetP75Rayleigh:finite(m.targetP75Rayleigh),targetP90Rayleigh:finite(m.targetP90Rayleigh),
+      logFluxErgCm2S:finite(m.logFluxErgCm2S),logMeanSurfaceFluxErgCm2SArcsec2:finite(m.logMeanSurfaceFluxErgCm2SArcsec2),
+      majorAxisArcsec:finite(m.majorAxisArcsec),minorAxisArcsec:finite(m.minorAxisArcsec),resolvedForQuantitative:m.resolvedForQuantitative===true,
+      resolutionConfidence:m.resolutionConfidence||null,detected:m.detected===true
     });
   }
+
   function signalRichness(signal={}){
-    let n=0;if(Number.isFinite(signal.surfaceBrightnessMagArcsec2))n+=6;if(Number.isFinite(signal.opacityClass))n+=6;if(Number.isFinite(signal.integratedMagnitude))n+=2;if(signal.majorArcmin>0&&signal.minorArcmin>0)n+=2;if(signal.confidence==='high')n+=1;return n;
+    let n=0;
+    if(signal.quantitative===true&&Number.isFinite(signal.halphaRayleigh)&&signal.halphaRayleigh>0)n+=10;
+    if(Number.isFinite(signal.surfaceBrightnessMagArcsec2))n+=6;
+    if(Number.isFinite(signal.opacityClass))n+=6;
+    if(Number.isFinite(signal.integratedMagnitude))n+=2;
+    if(signal.majorArcmin>0&&signal.minorArcmin>0)n+=2;
+    if(signal.confidence==='high')n+=1;
+    return n;
   }
 
   const metadataCache=new Map();
@@ -186,24 +237,26 @@
   function indexPool(pool){
     const rows=Array.isArray(pool)?pool:[];if(indexedCount===rows.length&&indexRows.length===rows.length)return;
     indexedCount=rows.length;indexByToken=new Map();indexRows=[];
-    for(const object of rows){
-      const meta=object?.photoMeta||metadataForObject(object),row={object,meta};indexRows.push(row);
-      for(const token of meta.identities){const old=indexByToken.get(token);if(!old||signalRichness(meta.signal)>signalRichness(old.meta.signal))indexByToken.set(token,row);}
-    }
+    for(const object of rows){const meta=object?.photoMeta||metadataForObject(object),row={object,meta};indexRows.push(row);for(const token of meta.identities){const old=indexByToken.get(token);if(!old||signalRichness(meta.signal)>signalRichness(old.meta.signal))indexByToken.set(token,row);}}
   }
   function attach(object){return object?.photoMeta?object:{...object,photoMeta:metadataForObject(object)};}
   function attachPool(pool){const rows=(Array.isArray(pool)?pool:[]).map(attach);indexPool(rows);return rows;}
 
-  const signalByToken=new Map();let signalLoadPromise=null,signalSupplementReady=false;
-  function bestSignalForTokens(tokens){let best=null;for(const token of tokens||[]){const s=signalByToken.get(token);if(s&&(!best||signalRichness(s)>signalRichness(best)))best=s;}return best;}
+  const signalByToken=new Map(),localSignalByToken=new Map();
+  let signalLoadPromise=null,signalSupplementReady=false,localSignalLoadPromise=null,localSignalReady=false;
+  function bestSignalForTokens(tokens,map=signalByToken){let best=null;for(const token of tokens||[]){const s=map.get(token);if(s&&(!best||signalRichness(s)>signalRichness(best)))best=s;}return best;}
   function mergeSignal(meta,extra){if(!extra||signalRichness(extra)<=signalRichness(meta.signal))return meta;return Object.freeze({...meta,signal:extra});}
   async function loadSignalSupplement(){
     if(signalSupplementReady)return true;if(signalLoadPromise)return signalLoadPromise;
-    signalLoadPromise=(async()=>{try{
-      const response=await fetch(SIGNAL_SUPPLEMENT_URL,{cache:'force-cache',mode:'cors'});if(!response.ok)throw new Error(`HTTP ${response.status}`);const payload=await response.json(),objects=Array.isArray(payload?.objects)?payload.objects:[];
-      for(const obj of objects){const base=metadataForObject(obj),signal=signalFromObject(obj,base);if(signalRichness(signal)<1)continue;for(const token of identityTokens(obj)){const old=signalByToken.get(token);if(!old||signalRichness(signal)>signalRichness(old))signalByToken.set(token,signal);}}
-      signalSupplementReady=true;return true;
-    }catch(e){console.warn('AstroTargetMetadata signal supplement unavailable',e);return false;}finally{signalLoadPromise=null;}})();return signalLoadPromise;
+    signalLoadPromise=(async()=>{try{const response=await fetch(SIGNAL_SUPPLEMENT_URL,{cache:'force-cache',mode:'cors'});if(!response.ok)throw new Error(`HTTP ${response.status}`);const payload=await response.json(),objects=Array.isArray(payload?.objects)?payload.objects:[];for(const obj of objects){const base=metadataForObject(obj),signal=signalFromObject(obj,base);if(signalRichness(signal)<1)continue;for(const token of identityTokens(obj)){const old=signalByToken.get(token);if(!old||signalRichness(signal)>signalRichness(old))signalByToken.set(token,signal);}}signalSupplementReady=true;return true;}catch(e){console.warn('AstroTargetMetadata signal supplement unavailable',e);return false;}finally{signalLoadPromise=null;}})();return signalLoadPromise;
+  }
+  async function loadLocalSignalData(){
+    if(localSignalReady)return true;if(localSignalLoadPromise)return localSignalLoadPromise;
+    localSignalLoadPromise=(async()=>{try{
+      const response=await fetch(LOCAL_SIGNAL_DATA_URL,{cache:'force-cache'});if(!response.ok)throw new Error(`HTTP ${response.status}`);const payload=await response.json();const records=Array.isArray(payload)?payload:Array.isArray(payload?.records)?payload.records:[];
+      for(const record of records){const signal=signalFromDatasetRecord(record);const tokens=strongIdentityTokens({name:null,aliases:Array.isArray(record?.aliases)?record.aliases:[]});if(!tokens.length)continue;for(const token of tokens){const old=localSignalByToken.get(token);if(!old||signalRichness(signal)>signalRichness(old))localSignalByToken.set(token,signal);}}
+      localSignalReady=true;return true;
+    }catch(e){console.warn('AstroTargetMetadata local signal dataset unavailable',e);return false;}finally{localSignalLoadPromise=null;}})();return localSignalLoadPromise;
   }
 
   function parseRA(value){const t=String(value??'').trim(),p=t.split(/[:\s]+/).map(Number);return t&&p.length&&!p.some(Number.isNaN)?15*(p[0]+(p[1]||0)/60+(p[2]||0)/3600):NaN;}
@@ -217,19 +270,35 @@
     for(const token of identityTokens(pseudo)){const row=indexByToken.get(token);if(row){matched=row;break;}}
     if(!matched){const ra=parseRA(target.ra),dec=parseDec(target.dec);if(Number.isFinite(ra)&&Number.isFinite(dec)){let best=null,bestDist=.08,c=Math.cos(dec*Math.PI/180);for(const row of indexRows){const o=row.object;if(!Number.isFinite(Number(o?.raDeg))||!Number.isFinite(Number(o?.decDeg)))continue;const dra=Math.abs(Number(o.raDeg)-ra)*c,ddec=Math.abs(Number(o.decDeg)-dec),dist=Math.hypot(dra,ddec);if(dist<bestDist){bestDist=dist;best=row;}}matched=best;}}
     let result=matched?(direct.source==='curated'?combineClassificationAndSignal(direct,matched.meta):matched.meta):direct;
-    const extra=bestSignalForTokens([...result.identities,...identityTokens(pseudo),...(matched?matched.meta.identities:[])]);result=mergeSignal(result,extra);return result;
+    const allTokens=[...result.identities,...identityTokens(pseudo),...(matched?matched.meta.identities:[])];
+    result=mergeSignal(result,bestSignalForTokens(allTokens,signalByToken));
+    if(result.signalKind==='line'){
+      const strong=[...new Set([...strongIdentityTokens(pseudo),...(matched?strongIdentityTokens(matched.object):[]),...allTokens.filter(t=>/^(?:m\d+|ngc\d+|ic\d+|sh2\d+|rcw\d+|lbn\d+|ldn\d+|ctb\d+|g\d|png\d|abellpn\d+)/.test(t))])];
+      result=mergeSignal(result,bestSignalForTokens(strong,localSignalByToken));
+    }
+    return result;
   }
 
   async function prepareSignalData(projects,pool){
     const list=Array.isArray(projects)?projects:[],rows=Array.isArray(pool)?pool:[];indexPool(rows);
-    let needSupplement=false;
-    for(const project of list){const meta=projectMetadata(project,rows);if(meta.physicalType==='dark-nebula'&&!Number.isFinite(meta.signal?.opacityClass)){needSupplement=true;break;}}
-    if(needSupplement)await loadSignalSupplement();
-    return{supplementReady:signalSupplementReady};
+    let needSupplement=false,needLocal=false;
+    for(const project of list){const meta=projectMetadata(project,rows);if(meta.signalKind==='line')needLocal=true;if(meta.physicalType==='dark-nebula'&&!Number.isFinite(meta.signal?.opacityClass))needSupplement=true;if(needLocal&&needSupplement)break;}
+    const jobs=[];if(needLocal)jobs.push(loadLocalSignalData());if(needSupplement)jobs.push(loadSignalSupplement());if(jobs.length)await Promise.all(jobs);
+    return{localSignalReady,supplementReady:signalSupplementReady};
+  }
+
+  function signalTimeFactor(meta){
+    const s=meta?.signal||{};
+    const quantitativeHalpha=(s.model==='halpha-surface-brightness'||s.model==='halpha-pn')&&s.quantitative===true&&Number.isFinite(s.halphaRayleigh)&&s.halphaRayleigh>0;
+    if(!quantitativeHalpha)return 1.0;
+    const raw=Math.min(SIGNAL_TIME_CONFIG.maxFactor,Math.max(SIGNAL_TIME_CONFIG.minFactor,Math.sqrt(SIGNAL_TIME_CONFIG.referenceRayleigh/s.halphaRayleigh)));
+    const confidenceWeight=SIGNAL_TIME_CONFIG.confidenceWeights[s.confidence]??SIGNAL_TIME_CONFIG.confidenceWeights.low;
+    return Math.pow(raw,confidenceWeight);
   }
 
   function signalDataStatus(meta){
     const s=meta?.signal||{};
+    if((s.model==='halpha-surface-brightness'||s.model==='halpha-pn')&&s.quantitative===true&&Number.isFinite(s.halphaRayleigh)&&s.halphaRayleigh>0)return'quantitative';
     if(s.model==='surface-brightness'&&Number.isFinite(s.surfaceBrightnessMagArcsec2))return'quantitative';
     if(s.model==='dark-opacity'&&Number.isFinite(s.opacityClass))return'quantitative';
     if(s.model==='integrated-magnitude'&&Number.isFinite(s.integratedMagnitude))return'descriptive';
@@ -238,8 +307,12 @@
 
   function signalSummary(meta){
     const s=meta?.signal||{};
+    if((s.model==='halpha-surface-brightness'||s.model==='halpha-pn')&&s.quantitative===true&&Number.isFinite(s.halphaRayleigh)){
+      const src=s.source==='Finkbeiner2003-Halpha-v1.1'?'Finkbeiner 2003':s.source==='HASH-V163'?'HASH/VizieR':s.source;
+      return`Hα ≈ ${s.halphaRayleigh.toFixed(1)} R${src?` (${src})`:''}`;
+    }
     if(s.model==='component-mismatch')return'fotometria katalogowa dotyczy składnika gwiazdowego, nie pyłu/refleksów';
-    if(s.model==='line-flux-missing')return'brak ilościowego pomiaru emisji liniowej';
+    if(s.model==='line-flux-missing'||s.model==='halpha-nonquantitative')return'brak ilościowego pomiaru emisji liniowej';
     if(s.model==='surface-brightness'&&Number.isFinite(s.surfaceBrightnessMagArcsec2)){const src=s.surfaceBrightnessSource==='catalog'?'katalogowa':'wyliczona z magnitudo i rozmiaru';return`μ ≈ ${s.surfaceBrightnessMagArcsec2.toFixed(2)} mag/arcsec² (${src})`;}
     if(s.model==='dark-opacity'&&Number.isFinite(s.opacityClass))return`opacity ${s.opacityClass}/6 · Aᵥ ≈ ${s.extinctionAv.toFixed(1)} mag`;
     if(s.model==='integrated-magnitude'&&Number.isFinite(s.integratedMagnitude))return`m ≈ ${s.integratedMagnitude.toFixed(2)}${s.magnitudeBand?` ${s.magnitudeBand}`:''}`;
@@ -252,5 +325,5 @@
     return{total:rows.length,byClass,byPhysical,byTypeCode,bySource,bySignalModel,unknownTypeCodes:[...unknownTypeCodes].sort(),lowConfidenceCount:lowConfidence.length,lowConfidence:lowConfidence.slice(0,200)};
   }
 
-  global.AstroTargetMetadata={TYPE_META,CLASS_LABELS,PHYSICAL_LABELS,metadataForObject,projectMetadata,prepareSignalData,attach,attachPool,indexPool,audit,signalSummary,signalDataStatus,meanSurfaceBrightness,photoClassLabel:key=>CLASS_LABELS[key]||CLASS_LABELS.mixed,physicalLabel:key=>PHYSICAL_LABELS[key]||PHYSICAL_LABELS.other};
+  global.AstroTargetMetadata={TYPE_META,CLASS_LABELS,PHYSICAL_LABELS,SIGNAL_TIME_CONFIG,metadataForObject,projectMetadata,prepareSignalData,attach,attachPool,indexPool,audit,signalSummary,signalDataStatus,signalTimeFactor,meanSurfaceBrightness,photoClassLabel:key=>CLASS_LABELS[key]||CLASS_LABELS.mixed,physicalLabel:key=>PHYSICAL_LABELS[key]||PHYSICAL_LABELS.other};
 })(window);
