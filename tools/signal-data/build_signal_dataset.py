@@ -317,15 +317,29 @@ def geometry_from_record(r: dict[str, Any], source_key: str) -> tuple[float | No
 
 
 def classify_line_target(r: dict[str, Any]) -> str | None:
-    code = str(r.get("typeCode") or r.get("type") or r.get("objectType") or "").strip()
+    # Explicit catalogue type wins over historical catalogue-group membership.
+    # Some planetary nebulae carry RCW/Sh2 cross-identifiers; those aliases must
+    # never reclassify a PN as a diffuse HII target for the 6 arcmin H-alpha map.
+    type_code = str(r.get("typeCode") or r.get("objectType") or "").strip()
     groups = groups_from_record(r)
     text = " ".join(flatten_strings([r.get("typeName"), r.get("typeLabel"), r.get("type")])).lower()
-    if code == "SNR" or "supernova remnant" in text:
+
+    if type_code == "SNR" or "supernova remnant" in text:
         return "supernova-remnant"
-    if code == "HII" or any(g in {"sharpless", "sh2", "rcw"} for g in groups) or "hii region" in text:
+    if type_code == "HII" or "hii region" in text:
         return "hii-region"
-    if code == "EmN" or "emission nebula" in text:
+    if type_code == "EmN" or "emission nebula" in text:
         return "emission-nebula"
+
+    # Known explicit non-diffuse/non-emission classes are terminal here.
+    # In particular PN must be handled only by the HASH flux path below.
+    if type_code and type_code not in {"Neb", "Other", "Cl+N"}:
+        return None
+    if "planetary nebula" in text or "reflection nebula" in text or "dark nebula" in text:
+        return None
+
+    if any(g in {"sharpless", "sh2", "rcw"} for g in groups):
+        return "hii-region"
     return None
 
 
@@ -825,7 +839,7 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     warnings: list[str] = []
     all_records: list[dict[str, Any]] = []
-    stats: dict[str, Any] = {"generatedAt": utc_now(), "builderVersion": 2}
+    stats: dict[str, Any] = {"generatedAt": utc_now(), "builderVersion": 3}
 
     with tempfile.TemporaryDirectory(prefix="astroplanner-signal-") as tmp:
         work_dir = Path(tmp)
