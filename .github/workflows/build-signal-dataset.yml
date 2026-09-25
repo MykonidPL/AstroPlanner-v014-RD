@@ -1,0 +1,48 @@
+name: Build signal dataset
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/signal-data/**'
+      - '.github/workflows/build-signal-dataset.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: tools/signal-data/requirements.txt
+
+      - name: Install builder dependencies
+        run: python -m pip install -r tools/signal-data/requirements.txt
+
+      - name: Build and audit signal dataset
+        run: python tools/signal-data/build_signal_dataset.py --output dist/signal-data
+
+      - name: Show audit
+        if: always()
+        run: |
+          if [ -f dist/signal-data/signal-data-audit.md ]; then
+            cat dist/signal-data/signal-data-audit.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload signal-data artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: astroplanner-signal-data
+          path: dist/signal-data/*
+          if-no-files-found: error
+          retention-days: 7
