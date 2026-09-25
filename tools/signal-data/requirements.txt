@@ -1,0 +1,4 @@
+requests==2.32.5
+numpy==2.3.3
+astropy==7.1.0
+healpy==1.18.1
