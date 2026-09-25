@@ -397,19 +397,48 @@ body[data-page="home"] .bottomNav{opacity:0;pointer-events:none;transform:transl
   .journalProjectSnapshot{margin:7px 0 3px}
 }
 
-/* v0.14 R&D — install action and mosaic material plans */
+/* v0.14 R&D — install action and compact mosaic editor */
 .homeInstallBtn{margin-top:22px;min-width:210px;padding:11px 18px}
 .homeInstallBtn[hidden]{display:none!important}
 
-.mosaicPanelCard{margin-top:10px;padding:10px;border:1px solid #2b3d61;border-radius:12px;background:#0a1322}
-.mosaicPanelCard:first-child{margin-top:8px}
-.mosaicPanelMaterialEditor{margin-top:10px;padding-top:10px;border-top:1px solid #243553}
-.mosaicPanelMaterialHead{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:4px}
-.mosaicPanelMaterialHead b{font-size:12px;color:#e4ecff}
-.mosaicPanelMaterialHead span{font-size:10px;color:var(--muted)}
-.mosaicPanelMaterialRow{margin-top:7px}
-.mosaicAddMaterialBtn{width:100%;margin-top:8px}
-.mosaicPanelMaterialEditor>.small{margin-top:7px}
+.mosaicSectionSummary{display:flex!important;align-items:center;justify-content:space-between;gap:10px}
+.mosaicSectionSummary small{font-size:10px;font-weight:650;color:var(--muted);white-space:nowrap}
+.mosaicSectionHint{margin:7px 2px 2px;line-height:1.4}
+.mosaicEditorHead{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:7px}
+.mosaicEditorHead>span{font-size:10px;color:var(--muted);white-space:nowrap}
+
+.mosaicPanelCard{margin-top:7px;padding:0;border:1px solid #2b3d61;border-radius:11px;background:#0a1322;overflow:hidden}
+.mosaicPanelCard:first-child{margin-top:6px}
+.mosaicPanelSummary{list-style:none;cursor:pointer;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;align-items:center;padding:9px 10px;background:#0d1728}
+.mosaicPanelSummary::-webkit-details-marker{display:none}
+.mosaicPanelSummary::after{content:'›';font-size:20px;line-height:1;color:#8fa7d1;transform:rotate(90deg);transition:transform .14s ease}
+.mosaicPanelCard[open]>.mosaicPanelSummary{background:#101d32;border-bottom:1px solid #253755}
+.mosaicPanelCard[open]>.mosaicPanelSummary::after{transform:rotate(-90deg)}
+.mosaicPanelSummaryText{min-width:0;display:flex;align-items:baseline;gap:8px}
+.mosaicPanelSummaryText b{font-size:13px;color:#edf3ff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mosaicPanelSummaryText small{font-size:10px;color:var(--muted);white-space:nowrap}
+.mosaicPanelDelete,.mosaicMiniDelete{border:1px solid rgba(255,124,124,.28);background:rgba(78,27,38,.54);color:#ffb8c2;border-radius:8px;font-size:10px;font-weight:750;padding:6px 8px;line-height:1}
+.mosaicPanelDelete{justify-self:end}
+
+.mosaicPanelBody{padding:9px}
+.mosaicPanelRow{display:grid!important;grid-template-columns:minmax(0,1fr) 112px!important;gap:7px!important;align-items:end!important;margin:0!important}
+.mosaicPanelRow label,.mosaicPanelMaterialRow label{font-size:10px;margin-bottom:3px}
+.mosaicGoalLabel{display:flex;align-items:center;justify-content:space-between;gap:5px}
+.mosaicGoalLabel span{font-size:8px;color:#8fa7d1;white-space:nowrap}
+.mosaicGoalLabel span[hidden]{display:none!important}
+.mosaicPanelRow input,.mosaicPanelMaterialRow input,.mosaicPanelMaterialRow select{min-height:38px;padding:8px 9px;border-radius:9px}
+.mosaicDerivedGoal{color:#c6d4ee!important;background:#101a2b!important;border-style:dashed!important}
+
+.mosaicPanelMaterialEditor{margin-top:8px;padding-top:8px;border-top:1px solid #243553}
+.mosaicPanelMaterialHead{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:2px}
+.mosaicPanelMaterialHead b{font-size:11px;color:#e4ecff}
+.mosaicPanelMaterialHead span{font-size:9px;color:var(--muted)}
+.mosaicPanelMaterialRow{display:grid;grid-template-columns:minmax(100px,1.15fr) minmax(130px,1.35fr) 76px 86px auto;grid-template-areas:'name filter goal exp remove';gap:6px;align-items:end;margin-top:6px;padding:7px;border:1px solid #223452;border-radius:9px;background:#091321}
+.mosaicMaterialName{grid-area:name}.mosaicMaterialFilter{grid-area:filter}.mosaicMaterialGoal{grid-area:goal}.mosaicMaterialExp{grid-area:exp}.mosaicMiniDelete{grid-area:remove;align-self:end;height:38px;padding:0 8px}
+.mosaicAddMaterialBtn{width:100%;margin-top:6px;padding:8px 10px!important;font-size:11px}
+.mosaicPanelAddActions{margin-top:7px}
+.mosaicPanelAddActions .secondary{padding:8px 10px;font-size:11px}
+.mosaicPanelListEditor{padding:9px!important}
 
 .mosaicNestedProgress{margin-top:9px;padding:8px;border:1px solid #263654;border-radius:9px;background:#091220}
 .mosaicNestedProgressItem{padding:8px 0;border-top:1px solid #202f4b}
@@ -418,8 +447,21 @@ body[data-page="home"] .bottomNav{opacity:0;pointer-events:none;transform:transl
 .mosaicNestedProgressItem .progress{height:6px;margin-top:7px}
 .mosaicPanelProgress>.materialPlanProgressMeta{margin-bottom:2px}
 
+@media(max-width:620px){
+  .mosaicPanelMaterialRow{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 62px;grid-template-areas:'name filter filter' 'goal exp remove'}
+  .mosaicPanelSummary{padding:8px 9px;gap:6px}
+  .mosaicPanelSummaryText{display:block}
+  .mosaicPanelSummaryText b,.mosaicPanelSummaryText small{display:block}
+  .mosaicPanelSummaryText small{margin-top:2px}
+}
 @media(max-width:520px){
   .homeInstallBtn{width:min(100%,260px)}
-  .mosaicPanelCard{padding:9px}
+  .mosaicPanelBody{padding:8px}
+  .mosaicPanelRow{grid-template-columns:minmax(0,1fr) 100px!important}
+  .mosaicPanelMaterialRow{padding:6px;gap:5px}
+  .mosaicPanelMaterialRow input,.mosaicPanelMaterialRow select,.mosaicPanelRow input{min-height:36px;padding:7px 8px}
+  .mosaicMiniDelete{height:36px;padding:0 6px}
+  .mosaicPanelDelete{padding:5px 7px}
+  .mosaicSectionSummary small,.mosaicEditorHead>span{font-size:9px}
 }
 

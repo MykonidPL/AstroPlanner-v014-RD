@@ -36,6 +36,16 @@ Nowa instalacja startuje z pustą biblioteką teleskopów, kamer, filtrów, kore
 
 ## Historia zmian
 
+### v0.14 R&D — porządek UI edytora mozaiki
+
+- panele mozaiki są teraz zwijanymi kartami; jednocześnie rozwinięty jest najwyżej jeden panel,
+- nagłówek panelu pokazuje nazwę, cel godzinowy i liczbę składników bez konieczności rozwijania formularza,
+- składniki panelu mają zwarty, dwurzędowy układ na telefonie; usuwanie paneli i składników nie zajmuje już pełnej szerokości,
+- gdy panel ma składniki, jego cel godzinowy jest polem tylko do odczytu i pokazuje automatyczną sumę składników,
+- sekcja mozaiki pokazuje zbiorczo liczbę paneli i łączny cel, a odstępy i wysokość pól zostały zmniejszone wyłącznie w edytorze mozaiki,
+- model danych, przypisanie sesji, Score, kadrowanie i raster DSS2 pozostają bez zmian,
+- cache PWA R&D: `astroplanner-v014-rd-mosaic-ui-cleanup1`.
+
 ### v0.14 R&D — mozaika: materiał per panel + poprawki UX/PWA
 
 - każdy panel mozaiki może mieć teraz własne składniki materiału z osobnym celem godzinowym, planowaną ekspozycją i filtrem; cel panelu jest automatycznie sumą jego składników,
