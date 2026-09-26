@@ -1288,6 +1288,13 @@ function recommendationProjectCoords(pr){
  const f=pr?.framing||{},fr=Number(f.centerRaDeg),fd=Number(f.centerDecDeg);if(validTargetCoords(fr,fd))return{raDeg:fr,decDeg:fd};
  const ra=parseRA(pr?.target?.ra),dec=parseDec(pr?.target?.dec);return validTargetCoords(ra,dec)?{raDeg:ra,decDeg:dec}:null;
 }
+function recommendationEffectiveProjectSignal(pr,metadata){
+ const resolve=window.AstroEffectiveProjectSignal?.resolve;if(typeof resolve!=='function')return null;
+ if(projectSignalIntent(pr)!=='ifn-field')return resolve(pr,{metadata});
+ const state=ifnFootprintFieldState();let footprint=null;
+ if(state.ready===true&&typeof window.AstroIfnFootprint?.evaluate==='function'){const layout=projectFramingLayout(pr);if(layout)footprint=window.AstroIfnFootprint.evaluate(layout);}
+ return resolve(pr,{metadata,footprint});
+}
 function recommendationDateObject(){return sessionDate();}
 function recommendationLocation(){
  const lat=Number($('latInput')?.value),lon=Number($('lonInput')?.value);if(!Number.isFinite(lat)||Math.abs(lat)>90||!Number.isFinite(lon)||Math.abs(lon)>180)return null;
@@ -1315,10 +1322,10 @@ async function refreshRecommendations(){
  if(contextLine)contextLine.textContent=`${fmtDate(localDateISO(date))} · ${loc.name} · ${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)} · min. ${minAlt.toFixed(0)}° · Słońce ≤ ${sunLimit.toFixed(0)}° · ustalanie jasności nieba…`;if(status)status.textContent='Liczenie rekomendacji…';if(list)list.innerHTML='';
  let sky=null;try{if(window.AstroBortle?.estimateAt)sky=await window.AstroBortle.estimateAt(loc.lat,loc.lon);}catch(_){sky=null;}if(seq!==__recommendationSeq||!plannerRecommendationsOpen())return;
  if(contextLine)contextLine.textContent=`${fmtDate(localDateISO(date))} · ${loc.name} · min. ${minAlt.toFixed(0)}° · Słońce ≤ ${sunLimit.toFixed(0)}°${sky?` · Bortle ≈ ${Number(sky.bortle).toFixed(0)}`:' · jasność nieba niedostępna'}`;
- if(!window.AstroRecommend||!window.AstroTargetMetadata||!window.AstroFilterProfiles){if(status)status.textContent='Moduły rekomendacji nie zostały załadowane.';return;}
+ if(!window.AstroRecommend||!window.AstroTargetMetadata||!window.AstroFilterProfiles||!window.AstroEffectiveProjectSignal){if(status)status.textContent='Moduły rekomendacji nie zostały załadowane.';return;}
  let context;try{context=window.AstroRecommend.buildContext({date,lat:loc.lat,lon:loc.lon,astro:{altitude,sunPos,moonPos,sep},stepMinutes:5});}catch(e){console.error(e);if(status)status.textContent='Nie udało się przygotować obliczeń dla tej nocy.';return;}
  const pool=catalogObjectPool(),equipment=getEquipment(),projects=getProjects().filter(pr=>['planned','active'].includes(pr.status||'active')),rows=[];let skipped=0;
- for(const project of projects){const coords=recommendationProjectCoords(project);if(!coords){skipped++;continue;}const metadata=window.AstroTargetMetadata.projectMetadata(project,pool),material=window.AstroFilterProfiles.projectProfile(project,equipment);try{const result=window.AstroRecommend.scoreTarget({...coords,classKey:metadata.photoClass,metadata,materialProfile:material,context,astro:{altitude,sunPos,moonPos,sep},sky,minAltitudeDeg:minAlt,sunLimitDeg:sunLimit});rows.push({project,classKey:metadata.photoClass,metadata,material,result});}catch(e){console.warn('Recommendation project skipped',project?.name,e);skipped++;}}
+ for(const project of projects){const coords=recommendationProjectCoords(project);if(!coords){skipped++;continue;}const metadata=window.AstroTargetMetadata.projectMetadata(project,pool),material=window.AstroFilterProfiles.projectProfile(project,equipment);try{const effectiveProjectSignal=recommendationEffectiveProjectSignal(project,metadata),result=window.AstroRecommend.scoreTarget({...coords,classKey:metadata.photoClass,metadata,effectiveProjectSignal,materialProfile:material,context,astro:{altitude,sunPos,moonPos,sep},sky,minAltitudeDeg:minAlt,sunLimitDeg:sunLimit});rows.push({project,classKey:metadata.photoClass,metadata,effectiveProjectSignal,material,result});}catch(e){console.warn('Recommendation project skipped',project?.name,e);skipped++;}}
  rows.sort((a,b)=>b.result.score-a.result.score||String(a.project.name||'').localeCompare(String(b.project.name||''),'pl'));
  if(status)status.textContent=sky?'Score: okno Planera + średnia jakość wysokości + model Księżyca + SQM/Bortle + metadane celu + rzeczywisty materiał/filtr.':'Score: okno Planera + średnia jakość wysokości + model Księżyca + metadane celu + materiał; jasność nieba chwilowo niedostępna.';
  renderRecommendationProjects(rows,sky,skipped);
