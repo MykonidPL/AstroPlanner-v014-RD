@@ -1,4 +1,4 @@
-const CACHE='astroplanner-v014-rd-signal-foundation11';
+const CACHE='astroplanner-v014-rd-signal-foundation12';
 const IFN_CACHE='astroplanner-ifn-sfd-v1-a8a4c69f';
 const IFN_ASSETS=['./ifn-sfd-field-v1.json','./ifn-sfd-field-v1.bin'];
 const IFN_ASSET_URLS=IFN_ASSETS.map(path=>new URL(path,self.location.href).href);
