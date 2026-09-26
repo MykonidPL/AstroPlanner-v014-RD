@@ -84,7 +84,13 @@
     return{factor:1,model:s.model||'unknown',confidence:s.confidence||'low',dataStatus,summary:global.AstroTargetMetadata?.signalSummary?.(metadata)||'brak ilościowych danych o sygnale'};
   }
 
-  function scoreTarget({raDeg,decDeg,classKey='mixed',metadata=null,materialProfile=null,context,astro,sky=null,minAltitudeDeg=30,sunLimitDeg=-18}){
+  function scoreSignalTimeDemand(effectiveProjectSignal,metadata){
+    if(effectiveProjectSignal===undefined)return signalTimeDemand(metadata);
+    const factor=Number(effectiveProjectSignal?.signalTimeFactor),validFactor=Number.isFinite(factor)&&factor>0,status=effectiveProjectSignal?.status;
+    return{factor:validFactor?factor:1,model:String(effectiveProjectSignal?.model||'unknown'),confidence:['high','medium','low'].includes(effectiveProjectSignal?.confidence)?effectiveProjectSignal.confidence:'low',dataStatus:validFactor&&['quantitative','descriptive','missing'].includes(status)?status:'missing',summary:String(effectiveProjectSignal?.summary||'brak ilościowych danych o sygnale')};
+  }
+
+  function scoreTarget({raDeg,decDeg,classKey='mixed',metadata=null,effectiveProjectSignal=undefined,materialProfile=null,context,astro,sky=null,minAltitudeDeg=30,sunLimitDeg=-18}){
     raDeg=Number(raDeg);decDeg=Number(decDeg);if(!validCoords(raDeg,decDeg))throw new Error('Nieprawidłowe współrzędne celu');
     if(!context?.samples?.length||!validAstro(astro))throw new Error('Brak kontekstu rekomendacji');
     minAltitudeDeg=clamp(Number(minAltitudeDeg),0,89.9);sunLimitDeg=clamp(Number(sunLimitDeg),-18,-6);metadata=metadata||{photoClass:classKey||'mixed'};materialProfile=materialProfile||defaultMaterial();
@@ -109,7 +115,7 @@
     const coverage=totalNightHours>0?clamp(usableHours/totalNightHours,0,1):0,meanTransmission=transmissionHours>0?transmissionSum/transmissionHours:0;
     const geometryScore=30*meanTransmission+35*clamp(usableHours/6,0,1)+25*coverage+10*clamp(window.hours/5,0,1);
     const timeMultiplier=conditionWeight>0?Math.exp(conditionLogSum/conditionWeight):siteMaterialZenithRatio,moonTimeFactor=conditionWeight>0?Math.exp(moonLogSum/conditionWeight):1,twilightTimeFactor=conditionWeight>0?Math.exp(twilightLogSum/conditionWeight):1;
-    const signal=signalTimeDemand(metadata),signalTimeFactor=signal.factor,filterSignalTimeFactor=1/(compatibility*compatibility),effectiveTimeDemand=Math.max(.02,timeMultiplier*signalTimeFactor*filterSignalTimeFactor),snrEfficiency=clamp(1/Math.sqrt(effectiveTimeDemand),0,1);
+    const signal=scoreSignalTimeDemand(effectiveProjectSignal,metadata),signalTimeFactor=signal.factor,filterSignalTimeFactor=1/(compatibility*compatibility),effectiveTimeDemand=Math.max(.02,timeMultiplier*signalTimeFactor*filterSignalTimeFactor),snrEfficiency=clamp(1/Math.sqrt(effectiveTimeDemand),0,1);
     const score=Math.round(clamp(geometryScore*snrEfficiency,0,100));
     const backgroundPenalty=100*(1-clamp(1/Math.sqrt(Math.max(1,timeMultiplier)),0,1)),compatibilityPenalty=100*(1-compatibility),materialNote=materialProfile.label||'materiał nieokreślony';
     const signalNote=signal.dataStatus==='missing'?`${signal.summary} (wkład neutralny)`:signal.dataStatus==='descriptive'?`${signal.summary} (dane opisowe; wkład neutralny)`:signal.summary;
