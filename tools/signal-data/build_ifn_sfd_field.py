@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""AstroPlanner R&D — Stage 4B.7q IFN SFD -> HEALPix v1 smoke builder + bounded 4096-record canary writer.
+"""AstroPlanner R&D — Stage 4B.7s IFN SFD -> HEALPix v1 builder with guarded full-sky writer.
 
 Purpose of this microstage:
 - validate the frozen output grid contract: HEALPix NSIDE=256, RING, ICRS;
 - measure mean/std raw SFD I100 in a native-map circular aperture r=0.5 deg;
 - prove the path on a small control/sample set only.
 
-This tool intentionally DOES NOT generate the all-sky runtime asset yet.
-The binary writer is canary-only: explicit smoke lists remain <=64 pixels, and the only larger mode is a fixed 4096-pixel evenly distributed all-sky canary.
-It never changes AstroPlanner runtime, Score, UI, or recommendations.
+The bounded canary modes remain available (explicit <=64 pixels and a fixed 4096-pixel grid).
+A full-sky writer is present but is gated behind an explicit --full-sky flag, requires both SFD hemispheres, and stages output in temporary files before validated finalization.
+This tool never changes AstroPlanner runtime, Score, UI, or recommendations.
 
 Input contract:
 - SFD_i100_4096_ngp.fits and/or SFD_i100_4096_sgp.fits
@@ -31,6 +31,9 @@ import argparse
 import hashlib
 import json
 import math
+import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +41,7 @@ from typing import Any, Iterable
 
 import numpy as np
 
-BUILDER_VERSION = "4B.7q-large-canary-1"
+BUILDER_VERSION = "4B.7s-gated-full-sky-1"
 MODEL = "ifn-sfd-i100"
 NSIDE = 256
 NPIX = 12 * NSIDE * NSIDE
@@ -48,6 +51,8 @@ APERTURE_RADIUS_DEG = 0.5
 EXPECTED_SHAPE = (4096, 4096)
 EXPECTED_OBJECT = "I100"
 EXPECTED_BUNIT = "MJy/sr"
+FULL_SKY_ASSET_BASENAME = "ifn-sfd-field-v1"
+FULL_SKY_RECORD_COUNT = NPIX
 
 SOURCE_FILENAMES = {
     +1: "SFD_i100_4096_ngp.fits",
@@ -545,7 +550,7 @@ def parse_pixel_list(spec: str) -> list[int]:
     if not out:
         raise argparse.ArgumentTypeError("pixel list is empty")
     if len(out) > 64:
-        raise argparse.ArgumentTypeError("Stage 4B.7q explicit smoke list allows at most 64 pixels")
+        raise argparse.ArgumentTypeError("Stage 4B.7s explicit smoke list allows at most 64 pixels")
     return out
 
 
@@ -633,7 +638,7 @@ def write_canary_asset(
 
     manifest = {
         "schemaVersion": 1,
-        "stage": "4B.7q",
+        "stage": "4B.7s",
         "kind": "bounded-canary-binary-not-runtime-asset",
         "generatedAt": utc_now(),
         "builderVersion": BUILDER_VERSION,
@@ -684,8 +689,205 @@ def write_canary_asset(
     )
     return binary_path, manifest_path, manifest
 
+
+def write_full_sky_asset(
+    maps: dict[int, SfdMap],
+    prefix: Path,
+) -> tuple[Path, Path, dict[str, Any]]:
+    """Build the complete NSIDE=256 field with staged, validated finalization.
+
+    Safety contract:
+    - both SFD hemispheres are mandatory;
+    - the basename is frozen to ifn-sfd-field-v1;
+    - exactly NPIX records are written as little-endian Float32 mean,std pairs;
+    - no final .bin/.json is created until the staged binary and manifest pass checks;
+    - on a handled failure during finalization, any newly finalized sibling is removed.
+    """
+    if set(maps) != {+1, -1}:
+        raise RuntimeError("full-sky build requires exactly NGP and SGP maps")
+    if prefix.name != FULL_SKY_ASSET_BASENAME:
+        raise RuntimeError(
+            f"full-sky asset prefix basename must be {FULL_SKY_ASSET_BASENAME!r}, got {prefix.name!r}"
+        )
+    if FULL_SKY_RECORD_COUNT != NPIX or NPIX != 12 * NSIDE * NSIDE:
+        raise RuntimeError("full-sky record-count invariant is broken")
+
+    final_bin = prefix.with_suffix(".bin")
+    final_manifest = prefix.with_suffix(".json")
+    prefix.parent.mkdir(parents=True, exist_ok=True)
+    if final_bin.exists() or final_manifest.exists():
+        raise RuntimeError(
+            f"refusing to overwrite existing full-sky asset: {final_bin} / {final_manifest}"
+        )
+
+    temp_dir = Path(
+        tempfile.mkdtemp(prefix=f".{FULL_SKY_ASSET_BASENAME}-build-", dir=str(prefix.parent))
+    )
+    temp_bin = temp_dir / final_bin.name
+    temp_manifest = temp_dir / final_manifest.name
+    expected_bytes = FULL_SKY_RECORD_COUNT * 2 * np.dtype("<f4").itemsize
+    chunk_records = 4096
+    chunk = np.empty((chunk_records, 2), dtype=np.dtype("<f4"))
+    chunk_used = 0
+    record_count = 0
+    stream_sha = hashlib.sha256()
+
+    try:
+        with temp_bin.open("wb") as f:
+            for pix in range(FULL_SKY_RECORD_COUNT):
+                rec = build_pixel_record(maps, pix)
+                mean = float(rec["meanI100"])
+                std = float(rec["stdI100"])
+                if not (math.isfinite(mean) and math.isfinite(std)):
+                    raise RuntimeError(f"non-finite full-sky value at HEALPix pixel {pix}")
+                if std < 0.0:
+                    raise RuntimeError(f"negative std at HEALPix pixel {pix}: {std}")
+
+                # Validate the values after the frozen Float32 cast as well.
+                mean32 = np.float32(mean)
+                std32 = np.float32(std)
+                if not (np.isfinite(mean32) and np.isfinite(std32)):
+                    raise RuntimeError(f"Float32 overflow/non-finite value at HEALPix pixel {pix}")
+
+                chunk[chunk_used, 0] = mean32
+                chunk[chunk_used, 1] = std32
+                chunk_used += 1
+                record_count += 1
+
+                if chunk_used == chunk_records:
+                    raw = chunk.tobytes(order="C")
+                    f.write(raw)
+                    stream_sha.update(raw)
+                    chunk_used = 0
+
+            if chunk_used:
+                raw = chunk[:chunk_used].tobytes(order="C")
+                f.write(raw)
+                stream_sha.update(raw)
+
+            f.flush()
+            os.fsync(f.fileno())
+
+        if record_count != FULL_SKY_RECORD_COUNT:
+            raise RuntimeError(
+                f"full-sky record count mismatch: expected {FULL_SKY_RECORD_COUNT}, got {record_count}"
+            )
+        actual_bytes = temp_bin.stat().st_size
+        if actual_bytes != expected_bytes:
+            raise RuntimeError(
+                f"full-sky byte length mismatch: expected {expected_bytes}, got {actual_bytes}"
+            )
+
+        disk_sha = sha256_file(temp_bin)
+        if disk_sha != stream_sha.hexdigest():
+            raise RuntimeError("full-sky SHA-256 mismatch between streamed and on-disk bytes")
+
+        decoded = np.memmap(temp_bin, dtype=np.dtype("<f4"), mode="r")
+        try:
+            if decoded.size != FULL_SKY_RECORD_COUNT * 2:
+                raise RuntimeError(
+                    f"full-sky Float32 count mismatch: expected {FULL_SKY_RECORD_COUNT * 2}, got {decoded.size}"
+                )
+            if not bool(np.all(np.isfinite(decoded))):
+                raise RuntimeError("full-sky binary validation found non-finite Float32 values")
+        finally:
+            del decoded
+
+        manifest = {
+            "schemaVersion": 1,
+            "stage": "4B.7s",
+            "kind": "full-sky-field-asset",
+            "generatedAt": utc_now(),
+            "builderVersion": BUILDER_VERSION,
+            "model": MODEL,
+            "source": "SFD-100um-I100",
+            "unit": EXPECTED_BUNIT,
+            "fullSky": True,
+            "buildComplete": True,
+            "grid": {
+                "type": "HEALPix",
+                "nside": NSIDE,
+                "npix": NPIX,
+                "ordering": ORDERING,
+                "frame": FRAME,
+            },
+            "aperture": {
+                "radiusDeg": APERTURE_RADIUS_DEG,
+                "statisticPrimary": "mean(I100)",
+                "statisticSecondary": "std(I100)",
+                "nativePixelSelection": "pixel-center within spherical aperture",
+                "stdDof": 0,
+                "zeroPointSubtraction": "none",
+            },
+            "binary": {
+                "filename": final_bin.name,
+                "dtype": "Float32",
+                "endianness": "little",
+                "layout": "interleaved meanI100,stdI100",
+                "fields": ["meanI100", "stdI100"],
+                "bytesPerRecord": 8,
+                "recordCount": record_count,
+                "byteLength": actual_bytes,
+                "sha256": disk_sha,
+            },
+            "sources": source_manifest(maps),
+            "validation": {
+                "allFinite": True,
+                "recordCountExact": record_count == FULL_SKY_RECORD_COUNT,
+                "expectedRecordCount": FULL_SKY_RECORD_COUNT,
+                "expectedByteLength": expected_bytes,
+                "actualByteLength": actual_bytes,
+                "sha256Verified": True,
+                "stagedBeforeFinalization": True,
+            },
+        }
+        temp_manifest.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        # Read the staged manifest back before exposing either final file.
+        check = json.loads(temp_manifest.read_text(encoding="utf-8"))
+        if check.get("buildComplete") is not True:
+            raise RuntimeError("staged full-sky manifest is not marked buildComplete")
+        if check.get("binary", {}).get("recordCount") != FULL_SKY_RECORD_COUNT:
+            raise RuntimeError("staged full-sky manifest recordCount mismatch")
+        if check.get("binary", {}).get("byteLength") != expected_bytes:
+            raise RuntimeError("staged full-sky manifest byteLength mismatch")
+        if check.get("binary", {}).get("sha256") != disk_sha:
+            raise RuntimeError("staged full-sky manifest SHA-256 mismatch")
+
+        # Finalization occurs only after every validation above has passed.
+        # Roll back the first sibling if the second rename fails.
+        bin_finalized = False
+        manifest_finalized = False
+        try:
+            os.replace(temp_bin, final_bin)
+            bin_finalized = True
+            os.replace(temp_manifest, final_manifest)
+            manifest_finalized = True
+        except Exception:
+            if manifest_finalized and final_manifest.exists():
+                final_manifest.unlink()
+            if bin_finalized and final_bin.exists():
+                final_bin.unlink()
+            raise
+
+        return final_bin, final_manifest, manifest
+    except Exception:
+        # Final paths are normally untouched until validated finalization.
+        # If a handled error occurs after one sibling is finalized, ensure no
+        # partial newly-created asset remains.
+        if final_bin.exists() and not final_manifest.exists():
+            final_bin.unlink()
+        if final_manifest.exists() and not final_bin.exists():
+            final_manifest.unlink()
+        raise
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Stage 4B.7q SFD I100 -> HEALPix smoke builder + bounded 4096-record canary writer")
+    parser = argparse.ArgumentParser(description="Stage 4B.7s SFD I100 -> HEALPix builder with bounded canaries and guarded full-sky writer")
     parser.add_argument("--ngp", type=Path, help="path to SFD_i100_4096_ngp.fits")
     parser.add_argument("--sgp", type=Path, help="path to SFD_i100_4096_sgp.fits")
     parser.add_argument("--control", action="append", default=[], metavar="NAME,L,B", help="measure a control field and the containing NSIDE=256 RING pixel")
@@ -695,20 +897,45 @@ def main() -> int:
     parser.add_argument(
         "--canary-asset-prefix",
         type=Path,
-        help="write canary records as PREFIX.bin + PREFIX.json; explicit --pixels <=64 or fixed --canary-grid-4096; never full-sky",
+        help="write canary records as PREFIX.bin + PREFIX.json; explicit --pixels <=64 or fixed --canary-grid-4096",
+    )
+    parser.add_argument(
+        "--full-sky",
+        action="store_true",
+        help="explicitly enable the complete 786432-record NSIDE=256 build; requires both SFD maps and --full-sky-asset-prefix",
+    )
+    parser.add_argument(
+        "--full-sky-asset-prefix",
+        type=Path,
+        help=f"full-sky output prefix; basename must be {FULL_SKY_ASSET_BASENAME!r}; writes validated .bin + .json",
     )
     args = parser.parse_args()
 
     if args.ngp is None and args.sgp is None:
         parser.error("at least one of --ngp/--sgp is required")
-    if args.canary_grid_4096 and args.pixels:
-        parser.error("--canary-grid-4096 and --pixels are mutually exclusive")
-    if args.canary_grid_4096 and args.canary_asset_prefix is None:
-        parser.error("--canary-grid-4096 requires --canary-asset-prefix")
-    if args.canary_grid_4096 and (args.ngp is None or args.sgp is None):
-        parser.error("--canary-grid-4096 requires both --ngp and --sgp")
-    if not args.control and not args.pixels and not args.canary_grid_4096:
-        parser.error("Stage 4B.7q requires --control, --pixels, or --canary-grid-4096; full-sky generation is intentionally not enabled")
+
+    if args.full_sky:
+        if args.ngp is None or args.sgp is None:
+            parser.error("--full-sky requires both --ngp and --sgp")
+        if args.full_sky_asset_prefix is None:
+            parser.error("--full-sky requires --full-sky-asset-prefix")
+        if args.full_sky_asset_prefix.name != FULL_SKY_ASSET_BASENAME:
+            parser.error(
+                f"--full-sky-asset-prefix basename must be {FULL_SKY_ASSET_BASENAME!r}"
+            )
+        if args.control or args.pixels or args.canary_grid_4096 or args.canary_asset_prefix is not None:
+            parser.error("--full-sky cannot be combined with control/canary modes")
+    else:
+        if args.full_sky_asset_prefix is not None:
+            parser.error("--full-sky-asset-prefix requires explicit --full-sky")
+        if args.canary_grid_4096 and args.pixels:
+            parser.error("--canary-grid-4096 and --pixels are mutually exclusive")
+        if args.canary_grid_4096 and args.canary_asset_prefix is None:
+            parser.error("--canary-grid-4096 requires --canary-asset-prefix")
+        if args.canary_grid_4096 and (args.ngp is None or args.sgp is None):
+            parser.error("--canary-grid-4096 requires both --ngp and --sgp")
+        if not args.control and not args.pixels and not args.canary_grid_4096:
+            parser.error("Stage 4B.7s requires a smoke/canary mode or explicit --full-sky")
 
     maps: dict[int, SfdMap] = {}
     if args.ngp is not None:
@@ -717,6 +944,23 @@ def main() -> int:
         maps[-1] = SfdMap.open(args.sgp, expected_nsgp=-1)
 
     hp_test = self_test_healpix()
+
+    if args.full_sky:
+        binary_path, manifest_path, manifest = write_full_sky_asset(
+            maps, args.full_sky_asset_prefix
+        )
+        print(json.dumps({
+            "stage": "4B.7s",
+            "mode": "full-sky",
+            "records": manifest["binary"]["recordCount"],
+            "bytes": manifest["binary"]["byteLength"],
+            "sha256": manifest["binary"]["sha256"],
+            "binary": str(binary_path),
+            "manifest": str(manifest_path),
+            "healpixRoundTripFailures": hp_test["roundTripFailures"],
+        }, ensure_ascii=False))
+        return 0
+
     controls = [parse_control(x) for x in args.control]
     control_records = [build_control_record(maps, name, l, b) for name, l, b in controls]
     if args.canary_grid_4096:
@@ -745,7 +989,7 @@ def main() -> int:
 
     payload = {
         "schemaVersion": 1,
-        "stage": "4B.7q",
+        "stage": "4B.7s",
         "kind": "smoke-validation-not-runtime-asset",
         "generatedAt": utc_now(),
         "builderVersion": BUILDER_VERSION,
@@ -777,7 +1021,7 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({
-        "stage": "4B.7q",
+        "stage": "4B.7s",
         "controls": len(control_records),
         "pixels": len(pixel_records),
         "healpixRoundTripFailures": hp_test["roundTripFailures"],
