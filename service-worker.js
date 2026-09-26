@@ -1,4 +1,4 @@
-const CACHE='astroplanner-v014-rd-signal-foundation9';
+const CACHE='astroplanner-v014-rd-signal-foundation10';
 const IFN_CACHE='astroplanner-ifn-sfd-v1-a8a4c69f';
 const IFN_ASSETS=['./ifn-sfd-field-v1.json','./ifn-sfd-field-v1.bin'];
 const IFN_ASSET_URLS=IFN_ASSETS.map(path=>new URL(path,self.location.href).href);
@@ -9,7 +9,7 @@ const CATALOG_ASSETS=[
   `https://raw.githubusercontent.com/acocalypso/celestia_atlas/${CATALOG_COMMIT}/data/stellarium-dso-supplement.json`,
   `https://raw.githubusercontent.com/acocalypso/celestia_atlas/${CATALOG_COMMIT}/data/abell-pn-catalog.json`
 ];
-const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png','./zwo-cameras.json','./framing-engine.js','./star-layer.js','./dso-layer.js','./framing-renderer.js','./raster-layer.js','./target-metadata.js','./target-signal-data.json','./filter-profiles.js','./recommendation-engine.js','./ifn-field.js','./ifn-footprint.js','./ui-shell.css','./ui-state.js','./bortle-indicator.js','./snapshot-store.js'];
+const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png','./zwo-cameras.json','./framing-engine.js','./star-layer.js','./dso-layer.js','./framing-renderer.js','./raster-layer.js','./target-metadata.js','./effective-project-signal.js','./target-signal-data.json','./filter-profiles.js','./recommendation-engine.js','./ifn-field.js','./ifn-footprint.js','./ui-shell.css','./ui-state.js','./bortle-indicator.js','./snapshot-store.js'];
 
 async function warmCatalogCache(){
   const cache=await caches.open(CATALOG_CACHE);
